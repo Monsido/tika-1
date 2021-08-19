@@ -56,11 +56,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.cxf.attachment.ContentDisposition;
 import org.apache.cxf.jaxrs.ext.multipart.Attachment;
 import org.apache.cxf.jaxrs.impl.MetadataMap;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.xml.sax.ContentHandler;
-import org.xml.sax.SAXException;
-
 import org.apache.tika.Tika;
 import org.apache.tika.config.TikaConfig;
 import org.apache.tika.config.TikaTaskTimeout;
@@ -86,6 +81,10 @@ import org.apache.tika.server.core.ServerStatus;
 import org.apache.tika.server.core.TikaServerConfig;
 import org.apache.tika.server.core.TikaServerParseException;
 import org.apache.tika.utils.ExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.SAXException;
 
 @Path("/tika")
 public class TikaResource {
@@ -641,7 +640,7 @@ public class TikaResource {
                         .setOutputProperty(OutputKeys.METHOD, format);
                 handler
                         .getTransformer()
-                        .setOutputProperty(OutputKeys.INDENT, "yes");
+                        .setOutputProperty(OutputKeys.INDENT, "no");
                 handler
                         .getTransformer()
                         .setOutputProperty(OutputKeys.ENCODING, UTF_8.name());
