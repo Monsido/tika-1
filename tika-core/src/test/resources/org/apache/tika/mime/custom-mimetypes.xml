@@ -26,10 +26,26 @@
   <!-- A more complex mimetype, with a glob and a match -->
   <mime-type type="hello/world-file">
      <_comment>A "Hello World" file</_comment>
+     <hello>world</hello>
      <glob pattern="*.hello.world" />
      <magic priority="50">
         <match value="Hello, World!" type="string" offset="0:13" />
      </magic>
      <sub-class-of type="hello/world" />
+  </mime-type>
+
+  <!-- This has the same match and priority, but different glob -->
+  <!-- We can use the filename to identify the difference, see TIKA-1292 -->
+  <mime-type type="hello/x-world-hello">
+     <glob pattern="*.x-hello-world" />
+     <magic priority="50">
+        <match value="Hello, World!" type="string" offset="0:13" />
+     </magic>
+  </mime-type>
+
+  <!-- add this to make testing with mock parser easier -->
+  <mime-type type="application/mock+xml">
+      <root-XML localName="mock"/>
+      <sub-class-of type="application/xml"/>
   </mime-type>
 </mime-info>

@@ -18,11 +18,14 @@ package org.apache.tika.detect;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
 import org.apache.tika.metadata.Metadata;
+import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.mime.MediaTypeRegistry;
 
@@ -40,10 +43,24 @@ public class CompositeDetector implements Detector {
 
     private final List<Detector> detectors;
 
-    public CompositeDetector(
-            MediaTypeRegistry registry, List<Detector> detectors) {
+    public CompositeDetector(MediaTypeRegistry registry, 
+            List<Detector> detectors, Collection<Class<? extends Detector>> excludeDetectors) {
+        if (excludeDetectors == null || excludeDetectors.isEmpty()) {
+            this.detectors = detectors;
+        } else {
+            this.detectors = new ArrayList<Detector>();
+            for (Detector d : detectors) {
+                if (!isExcluded(excludeDetectors, d.getClass())) {
+                    this.detectors.add(d);
+                }
+            }
+        }
         this.registry = registry;
-        this.detectors = detectors;
+    }
+    
+    public CompositeDetector(MediaTypeRegistry registry, 
+                             List<Detector> detectors) {
+        this(registry, detectors, null);
     }
 
     public CompositeDetector(List<Detector> detectors) {
@@ -58,6 +75,12 @@ public class CompositeDetector implements Detector {
             throws IOException { 
         MediaType type = MediaType.OCTET_STREAM;
         for (Detector detector : getDetectors()) {
+            //short circuit via OverrideDetector
+            //can't rely on ordering because subsequent detector may
+            //change Override's to a specialization of Override's
+            if (detector instanceof OverrideDetector && metadata.get(TikaCoreProperties.CONTENT_TYPE_OVERRIDE) != null) {
+                return detector.detect(input, metadata);
+            }
             MediaType detected = detector.detect(input, metadata);
             if (registry.isSpecializationOf(detected, type)) {
                 type = detected;
@@ -71,5 +94,15 @@ public class CompositeDetector implements Detector {
      */
     public List<Detector> getDetectors() {
        return Collections.unmodifiableList(detectors);
+    }
+    
+    private boolean isExcluded(Collection<Class<? extends Detector>> excludeDetectors, Class<? extends Detector> d) {
+        return excludeDetectors.contains(d) || assignableFrom(excludeDetectors, d);
+    }
+    private boolean assignableFrom(Collection<Class<? extends Detector>> excludeDetectors, Class<? extends Detector> d) {
+        for (Class<? extends Detector> e : excludeDetectors) {
+            if (e.isAssignableFrom(d)) return true;
+        }
+        return false;
     }
 }

@@ -19,10 +19,11 @@ package org.apache.tika.parser.microsoft;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.poi.hpsf.CustomProperties;
 import org.apache.poi.hpsf.DocumentSummaryInformation;
-import org.apache.poi.hpsf.MarkUnsupportedException;
 import org.apache.poi.hpsf.NoPropertySetStreamException;
 import org.apache.poi.hpsf.PropertySet;
 import org.apache.poi.hpsf.SummaryInformation;
@@ -30,7 +31,7 @@ import org.apache.poi.hpsf.UnexpectedPropertySetTypeException;
 import org.apache.poi.poifs.filesystem.DirectoryNode;
 import org.apache.poi.poifs.filesystem.DocumentEntry;
 import org.apache.poi.poifs.filesystem.DocumentInputStream;
-import org.apache.poi.poifs.filesystem.NPOIFSFileSystem;
+import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.MSOffice;
 import org.apache.tika.metadata.Metadata;
@@ -40,17 +41,20 @@ import org.apache.tika.metadata.OfficeOpenXMLExtended;
 import org.apache.tika.metadata.PagedText;
 import org.apache.tika.metadata.Property;
 import org.apache.tika.metadata.TikaCoreProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * Outlook Message Parser.
+ * Extractor for Common OLE2 (HPSF) metadata
  */
-class SummaryExtractor {
+public class SummaryExtractor {
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractPOIFSExtractor.class);
 
     private static final String SUMMARY_INFORMATION =
-        SummaryInformation.DEFAULT_STREAM_NAME;
+            SummaryInformation.DEFAULT_STREAM_NAME;
 
     private static final String DOCUMENT_SUMMARY_INFORMATION =
-        DocumentSummaryInformation.DEFAULT_STREAM_NAME;
+            DocumentSummaryInformation.DEFAULT_STREAM_NAME;
 
     private final Metadata metadata;
 
@@ -58,7 +62,7 @@ class SummaryExtractor {
         this.metadata = metadata;
     }
 
-    public void parseSummaries(NPOIFSFileSystem filesystem)
+    public void parseSummaries(POIFSFileSystem filesystem)
             throws IOException, TikaException {
         parseSummaries(filesystem.getRoot());
     }
@@ -73,10 +77,13 @@ class SummaryExtractor {
             DirectoryNode root, String entryName)
             throws IOException, TikaException {
         try {
+            if (! root.hasEntry(entryName)) {
+                return;
+            }
             DocumentEntry entry =
-                (DocumentEntry) root.getEntry(entryName);
+                    (DocumentEntry) root.getEntry(entryName);
             PropertySet properties =
-                new PropertySet(new DocumentInputStream(entry));
+                    new PropertySet(new DocumentInputStream(entry));
             if (properties.isSummaryInformation()) {
                 parse(new SummaryInformation(properties));
             }
@@ -89,14 +96,16 @@ class SummaryExtractor {
             // no property stream, just skip it
         } catch (UnexpectedPropertySetTypeException e) {
             throw new TikaException("Unexpected HPSF document", e);
-        } catch (MarkUnsupportedException e) {
-            throw new TikaException("Invalid DocumentInputStream", e);
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.warn("Ignoring unexpected exception while parsing summary entry {}", entryName, e);
         }
     }
 
     private void parse(SummaryInformation summary) {
         set(TikaCoreProperties.TITLE, summary.getTitle());
-        set(TikaCoreProperties.CREATOR, summary.getAuthor());
+        addMulti(metadata, TikaCoreProperties.CREATOR, summary.getAuthor());
         set(TikaCoreProperties.KEYWORDS, summary.getKeywords());
         // TODO Move to OO subject in Tika 2.0
         set(TikaCoreProperties.TRANSITION_SUBJECT_TO_OO_SUBJECT, summary.getSubject());
@@ -110,7 +119,7 @@ class SummaryExtractor {
         set(TikaCoreProperties.PRINT_DATE, summary.getLastPrinted());
         set(Metadata.EDIT_TIME, summary.getEditTime());
         set(OfficeOpenXMLExtended.DOC_SECURITY, summary.getSecurity());
-        
+
         // New style counts
         set(Office.WORD_COUNT, summary.getWordCount());
         set(Office.CHARACTER_COUNT, summary.getCharCount());
@@ -118,9 +127,9 @@ class SummaryExtractor {
         if (summary.getPageCount() > 0) {
             metadata.set(PagedText.N_PAGES, summary.getPageCount());
         }
-        
+
         // Old style, Tika 1.0 properties
-     // TODO Remove these in Tika 2.0
+        // TODO Remove these in Tika 2.0
         set(Metadata.TEMPLATE, summary.getTemplate());
         set(Metadata.APPLICATION_NAME, summary.getApplicationName());
         set(Metadata.REVISION_NUMBER, summary.getRevNumber());
@@ -132,22 +141,22 @@ class SummaryExtractor {
 
     private void parse(DocumentSummaryInformation summary) {
         set(OfficeOpenXMLExtended.COMPANY, summary.getCompany());
-        set(OfficeOpenXMLExtended.MANAGER, summary.getManager());
+        addMulti(metadata, OfficeOpenXMLExtended.MANAGER, summary.getManager());
         set(TikaCoreProperties.LANGUAGE, getLanguage(summary));
         set(OfficeOpenXMLCore.CATEGORY, summary.getCategory());
-        
+
         // New style counts
         set(Office.SLIDE_COUNT, summary.getSlideCount());
         if (summary.getSlideCount() > 0) {
             metadata.set(PagedText.N_PAGES, summary.getSlideCount());
         }
         // Old style, Tika 1.0 counts
-     // TODO Remove these in Tika 2.0
+        // TODO Remove these in Tika 2.0
         set(Metadata.COMPANY, summary.getCompany());
         set(Metadata.MANAGER, summary.getManager());
         set(MSOffice.SLIDE_COUNT, summary.getSlideCount());
         set(Metadata.CATEGORY, summary.getCategory());
-        
+
         parse(summary.getCustomProperties());
     }
 
@@ -164,6 +173,7 @@ class SummaryExtractor {
 
     /**
      * Attempt to parse custom document properties and add to the collection of metadata
+     *
      * @param customProperties
      */
     private void parse(CustomProperties customProperties) {
@@ -174,23 +184,23 @@ class SummaryExtractor {
 
                 // Get, convert and save property value
                 Object value = customProperties.get(name);
-                if (value instanceof String){
-                    set(key, (String)value);
+                if (value instanceof String) {
+                    set(key, (String) value);
                 } else if (value instanceof Date) {
                     Property prop = Property.externalDate(key);
-                    metadata.set(prop, (Date)value);
+                    metadata.set(prop, (Date) value);
                 } else if (value instanceof Boolean) {
                     Property prop = Property.externalBoolean(key);
-                    metadata.set(prop, ((Boolean)value).toString());
+                    metadata.set(prop, value.toString());
                 } else if (value instanceof Long) {
                     Property prop = Property.externalInteger(key);
-                    metadata.set(prop, ((Long)value).intValue());
+                    metadata.set(prop, ((Long) value).intValue());
                 } else if (value instanceof Double) {
                     Property prop = Property.externalReal(key);
-                    metadata.set(prop, ((Double)value).doubleValue());
+                    metadata.set(prop, (Double) value);
                 } else if (value instanceof Integer) {
                     Property prop = Property.externalInteger(key);
-                    metadata.set(prop, ((Integer)value).intValue());
+                    metadata.set(prop, ((Integer) value).intValue());
                 }
             }
         }
@@ -201,7 +211,7 @@ class SummaryExtractor {
             metadata.set(name, value);
         }
     }
-    
+
     private void set(Property property, String value) {
         if (value != null) {
             metadata.set(property, value);
@@ -223,6 +233,29 @@ class SummaryExtractor {
     private void set(String name, long value) {
         if (value > 0) {
             metadata.set(name, Long.toString(value));
+        }
+    }
+
+    //MS stores values that should be multiple values (e.g. dc:creator)
+    //as a semicolon-delimited list.  We need to split
+    //on semicolon to add each value.
+    public static void addMulti(Metadata metadata, Property property, String string) {
+        if (string == null) {
+            return;
+        }
+        String[] parts = string.split(";");
+        String[] current = metadata.getValues(property);
+        Set<String> seen = new HashSet<>();
+        if (current != null) {
+            for (String val : current) {
+                seen.add(val);
+            }
+        }
+        for (String part : parts) {
+            if (! seen.contains(part)) {
+                metadata.add(property, part);
+                seen.add(part);
+            }
         }
     }
 

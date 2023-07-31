@@ -17,35 +17,41 @@
 package org.apache.tika.metadata;
 
 //JDK imports
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Locale;
 import java.util.Properties;
+import java.util.Random;
+import java.util.TimeZone;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import org.apache.tika.utils.DateUtils;
+import org.junit.Test;
 
 //Junit imports
-import junit.framework.Test;
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
-import junit.textui.TestRunner;
 
 /**
  * JUnit based tests of class {@link org.apache.tika.metadata.Metadata}.
  */
-public class TestMetadata extends TestCase {
+public class TestMetadata {
 
     private static final String CONTENTTYPE = "contenttype";
 
-    public TestMetadata(String testName) {
-        super(testName);
-    }
-
-    public static Test suite() {
-        return new TestSuite(TestMetadata.class);
-    }
-
-    public static void main(String[] args) {
-        TestRunner.run(suite());
-    }
-
     /** Test for the <code>add(String, String)</code> method. */
+    @Test
     public void testAdd() {
         String[] values = null;
         Metadata meta = new Metadata();
@@ -83,6 +89,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for the <code>set(String, String)</code> method. */
+    @Test
     public void testSet() {
         String[] values = null;
         Metadata meta = new Metadata();
@@ -109,6 +116,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>setAll(Properties)</code> method. */
+    @Test
     public void testSetProperties() {
         String[] values = null;
         Metadata meta = new Metadata();
@@ -136,6 +144,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>get(String)</code> method. */
+    @Test
     public void testGet() {
         Metadata meta = new Metadata();
         assertNull(meta.get("a-name"));
@@ -146,6 +155,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>isMultiValued()</code> method. */
+    @Test
     public void testIsMultiValued() {
         Metadata meta = new Metadata();
         assertFalse(meta.isMultiValued("key"));
@@ -156,6 +166,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>names</code> method. */
+    @Test
     public void testNames() {
         String[] names = null;
         Metadata meta = new Metadata();
@@ -172,6 +183,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>remove(String)</code> method. */
+    @Test
     public void testRemove() {
         Metadata meta = new Metadata();
         meta.remove("name-one");
@@ -193,6 +205,7 @@ public class TestMetadata extends TestCase {
     }
 
     /** Test for <code>equals(Object)</code> method. */
+    @Test
     public void testObject() {
         Metadata meta1 = new Metadata();
         Metadata meta2 = new Metadata();
@@ -221,6 +234,7 @@ public class TestMetadata extends TestCase {
      * Tests for getting and setting integer
      *  based properties
      */
+    @Test
     public void testGetSetInt() {
         Metadata meta = new Metadata();
         
@@ -259,6 +273,7 @@ public class TestMetadata extends TestCase {
      * Tests for getting and setting date
      *  based properties
      */
+    @Test
     public void testGetSetDate() {
         Metadata meta = new Metadata();
         long hour = 60 * 60 * 1000; 
@@ -330,12 +345,19 @@ public class TestMetadata extends TestCase {
      * Some documents, like jpegs, might have date in unspecified time zone
      * which should be handled like strings but verified to have parseable ISO 8601 format
      */
+    @Test
     public void testGetSetDateUnspecifiedTimezone() {
         Metadata meta = new Metadata();    
         
+        // Set explictly without a timezone
         meta.set(TikaCoreProperties.CREATED, "1970-01-01T00:00:01");
         assertEquals("should return string without time zone specifier because zone is not known",
         		"1970-01-01T00:00:01", meta.get(TikaCoreProperties.CREATED));
+        
+        // Now ask DateUtils to format for us without one
+        meta.set(TikaCoreProperties.CREATED, DateUtils.formatDateUnknownTimezone(new Date(1000)));
+        assertEquals("should return string without time zone specifier because zone is not known",
+                         "1970-01-01T00:00:01", meta.get(TikaCoreProperties.CREATED));
     }
     
     /**
@@ -343,6 +365,7 @@ public class TestMetadata extends TestCase {
      *  composite the value can be retrieved with the property or the aliases
      */
     @SuppressWarnings("deprecation")
+    @Test
     public void testCompositeProperty() {
        Metadata meta = new Metadata();
        Property compositeProperty = Property.composite(
@@ -360,5 +383,105 @@ public class TestMetadata extends TestCase {
        // Fetch as the aliases
        assertEquals(message, meta.get(Metadata.DESCRIPTION));
        assertEquals(message, meta.get("testDescriptionAlt"));
-    }    
+    }
+
+    @Test
+    public void testMultithreadedDates() throws Exception {
+        int numThreads = 10;
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+        ExecutorCompletionService<Integer> executorCompletionService = new ExecutorCompletionService<Integer>(executorService);
+        for (int i = 0; i < numThreads; i++) {
+            executorCompletionService.submit(new MetadataDateAdder());
+        }
+        int finished = 0;
+        while (finished < numThreads) {
+            Future<Integer> future = executorCompletionService.take();
+            if (future != null && future.isDone()) {
+                Integer retVal = future.get();
+                finished++;
+            }
+        }
+
+    }
+
+    private class MetadataDateAdder implements Callable<Integer> {
+        private final Random random = new Random();
+        @Override
+        public Integer call() throws Exception {
+            for (int i = 0; i < 1000; i++) {
+                Metadata m = new Metadata();
+                long start = System.currentTimeMillis();
+                start += random.nextInt(1000000);
+                Date now = new Date(start);
+                DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US);
+                m.set(TikaCoreProperties.CREATED, df.format(now));
+                df.setTimeZone(TimeZone.getTimeZone("UTC"));
+                assertTrue(Math.abs(now.getTime() - m.getDate(TikaCoreProperties.CREATED).getTime()) < 2000);
+
+            }
+            return 1;
+        }
+    }
+    
+    @Test
+    public void testEquals() {
+        Metadata meta1 = new Metadata();
+        meta1.add("key", "value1");
+        meta1.add("key", "value2");
+        meta1.add("key2", "value12");
+        
+        Metadata meta2 = new Metadata();
+        meta2.add("key", "value1");
+        meta2.add("key", "value2");
+        meta2.add("key2", "value12");
+        
+        assertEquals(meta1, meta2);
+    }
+    
+    @Test
+    public void testNotEquals() {
+        Metadata meta1 = new Metadata();
+        meta1.add("key", "value1");
+        meta1.add("key", "value2");
+        meta1.add("key2", "value12");
+        
+        Metadata meta2 = new Metadata();
+        meta2.add("key", "value1");
+        meta2.add("key", "value2");
+        meta2.add("key2", "value22");
+        
+        assertFalse(meta1.equals(meta2));
+    }
+    
+    @Test
+    public void testEqualAndHashCode() {
+        Metadata meta1 = new Metadata();
+        meta1.add("key", "value1");
+        meta1.add("key", "value2");
+        meta1.add("key2", "value12");
+        
+        Metadata meta2 = new Metadata();
+        meta2.add("key", "value1");
+        meta2.add("key", "value2");
+        meta2.add("key2", "value12");
+        
+        assertEquals(meta1, meta2);
+        assertEquals(meta1.hashCode(), meta2.hashCode());
+    }
+    
+    @Test
+    public void testToStringWithManyEntries() {
+        Metadata m = new Metadata();
+        m.add("key", "value1");
+        m.add("key", "value2");
+        m.add("key2", "value12");
+        assertEquals("key2=value12 key=value1 key=value2", m.toString());
+    }
+    
+    @Test
+    public void testToStringWithSingleEntry() {
+        Metadata m = new Metadata();
+        m.add("key", "value1");
+        assertEquals("key=value1", m.toString());
+    }
 }

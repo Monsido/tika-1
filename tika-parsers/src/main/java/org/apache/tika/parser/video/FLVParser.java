@@ -37,6 +37,8 @@ import org.apache.tika.sax.XHTMLContentHandler;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 /**
  * <p>
  * Parser for metadata contained in Flash Videos (.flv). Resources:
@@ -81,9 +83,10 @@ public class FLVParser extends AbstractParser {
     }
 
     private int readUInt24(DataInputStream input) throws IOException {
-        int uint = input.read()<<16;
-        uint += input.read()<<8;
-        uint += input.read(); 
+        //readunsignedbyte checks for eof
+        int uint = input.readUnsignedByte()<<16;
+        uint += input.readUnsignedByte()<<8;
+        uint += input.readUnsignedByte();
         return uint;
     }
 
@@ -130,7 +133,7 @@ public class FLVParser extends AbstractParser {
         int size = input.readUnsignedShort();
         byte[] chars = new byte[size];
         input.readFully(chars);
-        return new String(chars);
+        return new String(chars, UTF_8);
     }
 
     private Object readAMFObject(DataInputStream input) throws IOException {
@@ -207,7 +210,7 @@ public class FLVParser extends AbstractParser {
                 break;
             }
 
-            int datalen = readUInt24(datainput); //body length
+            final int datalen = readUInt24(datainput); //body length
             readUInt32(datainput); // timestamp
             readUInt24(datainput); // streamid
 
@@ -239,6 +242,9 @@ public class FLVParser extends AbstractParser {
                     // separate AMF blocks, we currently loose previous values)
                     Map<String, Object> extractedMetadata = (Map<String, Object>) data;
                     for (Entry<String, Object> entry : extractedMetadata.entrySet()) {
+                        if (entry.getValue() == null) {
+                            continue;
+                        }
                         metadata.set(entry.getKey(), entry.getValue().toString());
                     }
                 }

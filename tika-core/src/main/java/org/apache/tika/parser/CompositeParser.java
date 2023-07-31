@@ -16,17 +16,8 @@
  */
 package org.apache.tika.parser;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.exception.WriteLimitReachedException;
 import org.apache.tika.io.TemporaryResources;
 import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.metadata.Metadata;
@@ -35,6 +26,17 @@ import org.apache.tika.mime.MediaTypeRegistry;
 import org.apache.tika.sax.TaggedContentHandler;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Composite parser that delegates parsing tasks to a component parser
@@ -62,9 +64,22 @@ public class CompositeParser extends AbstractParser {
      */
     private Parser fallback = new EmptyParser();
 
-    public CompositeParser(MediaTypeRegistry registry, List<Parser> parsers) {
-        this.parsers = parsers;
+    public CompositeParser(MediaTypeRegistry registry, List<Parser> parsers,
+                           Collection<Class<? extends Parser>> excludeParsers) {
+        if (excludeParsers == null || excludeParsers.isEmpty()) {
+            this.parsers = parsers;
+        } else {
+            this.parsers = new ArrayList<Parser>();
+            for (Parser p : parsers) {
+                if (!isExcluded(excludeParsers, p.getClass())) {
+                    this.parsers.add(p);
+                }
+            }
+        }
         this.registry = registry;
+    }
+    public CompositeParser(MediaTypeRegistry registry, List<Parser> parsers) {
+        this(registry, parsers, null);
     }
 
     public CompositeParser(MediaTypeRegistry registry, Parser... parsers) {
@@ -83,6 +98,16 @@ public class CompositeParser extends AbstractParser {
             }
         }
         return map;
+    }
+
+    private boolean isExcluded(Collection<Class<? extends Parser>> excludeParsers, Class<? extends Parser> p) {
+        return excludeParsers.contains(p) || assignableFrom(excludeParsers, p);
+    }
+    private boolean assignableFrom(Collection<Class<? extends Parser>> excludeParsers, Class<? extends Parser> p) {
+        for (Class<? extends Parser> e : excludeParsers) {
+            if (e.isAssignableFrom(p)) return true;
+        }
+        return false;
     }
 
     /**
@@ -139,6 +164,15 @@ public class CompositeParser extends AbstractParser {
         this.registry = registry;
     }
 
+    /**
+     * Returns all parsers registered with the Composite Parser,
+     *  including ones which may not currently be active.
+     * This won't include the Fallback Parser, if defined
+     */
+    public List<Parser> getAllComponentParsers() {
+        return Collections.unmodifiableList(parsers);
+    }
+    
     /**
      * Returns the component parsers.
      *
@@ -203,7 +237,6 @@ public class CompositeParser extends AbstractParser {
            // We always work on the normalised, canonical form
            type = registry.normalize(type);
         }
-        
         while (type != null) {
             // Try finding a parser for the type
             Parser parser = map.get(type);
@@ -233,24 +266,36 @@ public class CompositeParser extends AbstractParser {
             InputStream stream, ContentHandler handler,
             Metadata metadata, ParseContext context)
             throws IOException, SAXException, TikaException {
-        Parser parser = getParser(metadata);
+        Parser parser = getParser(metadata, context);
         TemporaryResources tmp = new TemporaryResources();
         try {
             TikaInputStream taggedStream = TikaInputStream.get(stream, tmp);
-            TaggedContentHandler taggedHandler = new TaggedContentHandler(handler);
+            TaggedContentHandler taggedHandler = 
+                handler != null ? new TaggedContentHandler(handler) : null;
+            if (parser instanceof ParserDecorator){
+                metadata.add("X-Parsed-By", ((ParserDecorator) parser).getWrappedParser().getClass().getName());
+            } else {
+                metadata.add("X-Parsed-By", parser.getClass().getName());
+            }
             try {
                 parser.parse(taggedStream, taggedHandler, metadata, context);
-            } catch (RuntimeException e) {
-                throw new TikaException(
-                        "Unexpected RuntimeException from " + parser, e);
+            } catch (SecurityException e) {
+                //rethrow security exceptions
+                throw e;
             } catch (IOException e) {
                 taggedStream.throwIfCauseOf(e);
                 throw new TikaException(
                         "TIKA-198: Illegal IOException from " + parser, e);
             } catch (SAXException e) {
-                taggedHandler.throwIfCauseOf(e);
+                if (taggedHandler != null) taggedHandler.throwIfCauseOf(e);
+                if (WriteLimitReachedException.isWriteLimitReached(e)) {
+                    throw e;
+                }
                 throw new TikaException(
                         "TIKA-237: Illegal SAXException from " + parser, e);
+            } catch (RuntimeException e) {
+                throw new TikaException(
+                        "Unexpected RuntimeException from " + parser, e);
             }
         } finally {
             tmp.dispose();

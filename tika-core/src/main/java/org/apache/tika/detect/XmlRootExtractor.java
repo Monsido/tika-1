@@ -17,14 +17,16 @@
 package org.apache.tika.detect;
 
 import java.io.ByteArrayInputStream;
+import java.io.CharConversionException;
 import java.io.InputStream;
+import java.util.Arrays;
 
-import javax.xml.XMLConstants;
 import javax.xml.namespace.QName;
-import javax.xml.parsers.SAXParserFactory;
 
 import org.apache.tika.io.CloseShieldInputStream;
+import org.apache.tika.parser.ParseContext;
 import org.apache.tika.sax.OfflineContentHandler;
+import org.apache.tika.utils.XMLReaderUtils;
 import org.xml.sax.Attributes;
 import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
@@ -36,25 +38,49 @@ import org.xml.sax.helpers.DefaultHandler;
  * @since Apache Tika 0.4
  */
 public class XmlRootExtractor {
+    private static final ParseContext EMPTY_CONTEXT = new ParseContext();
 
     public QName extractRootElement(byte[] data) {
-        return extractRootElement(new ByteArrayInputStream(data));
+        // this loop should be very rare
+        while (true) {
+            try {
+                return extractRootElement(new ByteArrayInputStream(data), true);
+            } catch (MalformedCharException e) {
+                // see TIKA-3596, try to handle truncated/bad encoded XML files
+                int newLen = data.length / 2;
+                if (newLen % 2 == 1) {
+                    newLen--;
+                }
+                if (newLen > 0) {
+                    data = Arrays.copyOf(data, newLen);
+                } else {
+                    break;
+                }
+            }
+        }
+        return null;
     }
 
     /**
      * @since Apache Tika 0.9
      */
     public QName extractRootElement(InputStream stream) {
+        return extractRootElement(stream, false);
+    }
+    
+    private QName extractRootElement(InputStream stream, boolean throwMalformed) {
         ExtractorHandler handler = new ExtractorHandler();
         try {
-            SAXParserFactory factory = SAXParserFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setValidating(false);
-            factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-            factory.newSAXParser().parse(
+            XMLReaderUtils.parseSAX(
                     new CloseShieldInputStream(stream),
-                    new OfflineContentHandler(handler));
-        } catch (Exception ignore) {
+                    new OfflineContentHandler(handler), EMPTY_CONTEXT);
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            if (throwMalformed && (e instanceof CharConversionException
+                    || e.getCause() instanceof CharConversionException)) {
+                throw new MalformedCharException(e);
+            }
         }
         return handler.rootElement;
     }
@@ -69,6 +95,14 @@ public class XmlRootExtractor {
                 throws SAXException {
             this.rootElement = new QName(uri, local);
             throw new SAXException("Aborting: root element received");
+        }
+
+    }
+
+    private static class MalformedCharException extends RuntimeException {
+
+        public MalformedCharException(Exception e) {
+            super(e);
         }
 
     }

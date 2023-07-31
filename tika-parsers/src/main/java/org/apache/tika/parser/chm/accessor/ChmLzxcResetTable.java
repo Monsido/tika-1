@@ -28,11 +28,6 @@ import org.apache.tika.parser.chm.exception.ChmParsingException;
  * LZXC reset table For ensuring a decompression. Reads the block named
  * "::DataSpace/Storage/<SectionName>/Transform/{7FC28940-9D31-11D0-9B27-00A0C91E9C7C}/InstanceData/ResetTable"
  * .
- * 
- * {@link http
- * ://translated.by/you/microsoft-s-html-help-chm-format-incomplete/original
- * /?page=2 }
- * 
  */
 public class ChmLzxcResetTable implements ChmAccessor<ChmLzxcResetTable> {
     private static final long serialVersionUID = -8209574429411707460L;
@@ -158,10 +153,10 @@ public class ChmLzxcResetTable implements ChmAccessor<ChmLzxcResetTable> {
 
     private long unmarshalUInt32(byte[] data, long dest) throws TikaException {
         ChmAssert.assertByteArrayNotNull(data);
-        dest = data[this.getCurrentPlace()]
-                | data[this.getCurrentPlace() + 1] << 8
-                | data[this.getCurrentPlace() + 2] << 16
-                | data[this.getCurrentPlace() + 3] << 24;
+        dest = (data[this.getCurrentPlace()] & 0xff)
+                | (data[this.getCurrentPlace() + 1] & 0xff) << 8
+                | (data[this.getCurrentPlace() + 2] & 0xff) << 16
+                | (data[this.getCurrentPlace() + 3] & 0xff) << 24;
 
         setDataRemained(this.getDataRemained() - 4);
         this.setCurrentPlace(this.getCurrentPlace() + 4);
@@ -316,13 +311,6 @@ public class ChmLzxcResetTable implements ChmAccessor<ChmLzxcResetTable> {
      */
     public void setBlockLlen(long block_len) {
         this.block_len = block_len;
-    }
-
-    /**
-     * @param args
-     */
-    public static void main(String[] args) {
-
     }
 
     // @Override

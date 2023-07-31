@@ -20,16 +20,20 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.Reader;
 
+import org.apache.tika.TikaTest;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
+import org.junit.Test;
 
-import junit.framework.TestCase;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.Assert.assertEquals;
 
-public class ParsingReaderTest extends TestCase {
+public class ParsingReaderTest extends TikaTest {
 
+    @Test
     public void testPlainText() throws Exception {
         String data = "test content";
-        InputStream stream = new ByteArrayInputStream(data.getBytes("UTF-8"));
+        InputStream stream = new ByteArrayInputStream(data.getBytes(UTF_8));
         Reader reader = new ParsingReader(stream, "test.txt");
         assertEquals('t', reader.read());
         assertEquals('e', reader.read());
@@ -49,14 +53,17 @@ public class ParsingReaderTest extends TestCase {
         assertEquals(-1, stream.read());
     }
 
+    @Test
     public void testXML() throws Exception {
         String data = "<p>test <span>content</span></p>";
-        InputStream stream = new ByteArrayInputStream(data.getBytes("UTF-8"));
+        InputStream stream = new ByteArrayInputStream(data.getBytes(UTF_8));
         Reader reader = new ParsingReader(stream, "test.xml");
+        assertEquals(' ', (char) reader.read());
         assertEquals('t', (char) reader.read());
         assertEquals('e', (char) reader.read());
         assertEquals('s', (char) reader.read());
         assertEquals('t', (char) reader.read());
+        assertEquals(' ', (char) reader.read());
         assertEquals(' ', (char) reader.read());
         assertEquals('c', (char) reader.read());
         assertEquals('o', (char) reader.read());
@@ -76,13 +83,13 @@ public class ParsingReaderTest extends TestCase {
      *
      * @see <a href="https://issues.apache.org/jira/browse/TIKA-203">TIKA-203</a>
      */
+    @Test
     public void testMetadata() throws Exception {
         Metadata metadata = new Metadata();
         InputStream stream = ParsingReaderTest.class.getResourceAsStream(
                 "/test-documents/testEXCEL.xls");
-        Reader reader = new ParsingReader(
-                new AutoDetectParser(), stream, metadata, new ParseContext());
-        try {
+        try (Reader reader = new ParsingReader(
+                AUTO_DETECT_PARSER, stream, metadata, new ParseContext())) {
             // Metadata should already be available
             assertEquals("Simple Excel document", metadata.get(TikaCoreProperties.TITLE));
             // Check that the internal buffering isn't broken
@@ -92,9 +99,13 @@ public class ParsingReaderTest extends TestCase {
             assertEquals('i', (char) reader.read());
             assertEquals('l', (char) reader.read());
             assertEquals('1', (char) reader.read());
-        } finally {
-            reader.close();
         }
     }
 
+    @Test
+    public void testZeroByte() throws Exception {
+        InputStream is = new ByteArrayInputStream(new byte[0]);
+        ParsingReader r = new ParsingReader(is);
+        assertEquals(-1, r.read());
+    }
 }

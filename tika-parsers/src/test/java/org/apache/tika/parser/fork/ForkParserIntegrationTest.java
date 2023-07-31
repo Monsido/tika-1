@@ -16,6 +16,14 @@
  */
 package org.apache.tika.parser.fork;
 
+import static org.apache.tika.TikaTest.assertContains;
+import static org.apache.tika.TikaTest.debug;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
+
+import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.NotSerializableException;
@@ -23,19 +31,22 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
-import junit.framework.TestCase;
-
+import org.apache.commons.io.filefilter.TrueFileFilter;
+import org.apache.tika.MultiThreadedTikaTest;
 import org.apache.tika.Tika;
-import org.apache.tika.config.TikaConfig;
-import org.apache.tika.detect.DefaultDetector;
+import org.apache.tika.TikaTest;
 import org.apache.tika.detect.Detector;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.fork.ForkParser;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.mime.MediaType;
+import org.apache.tika.parser.EmptyParser;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
+import org.apache.tika.parser.RecursiveParserWrapper;
 import org.apache.tika.sax.BodyContentHandler;
+import org.junit.Ignore;
+import org.junit.Test;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
@@ -43,13 +54,14 @@ import org.xml.sax.SAXException;
  * Test that the ForkParser correctly behaves when
  *  wired in to the regular Parsers and their test data
  */
-public class ForkParserIntegrationTest extends TestCase {
+public class ForkParserIntegrationTest extends MultiThreadedTikaTest {
 
     private Tika tika = new Tika(); // TODO Use TikaConfig instead, when it works
 
     /**
      * Simple text parsing
      */
+    @Test
     public void testForkedTextParsing() throws Exception {
         ForkParser parser = new ForkParser(
                 ForkParserIntegrationTest.class.getClassLoader(),
@@ -63,8 +75,8 @@ public class ForkParserIntegrationTest extends TestCase {
           parser.parse(stream, output, new Metadata(), context);
 
           String content = output.toString();
-          assertTrue(content.contains("Test d'indexation"));
-          assertTrue(content.contains("http://www.apache.org"));
+          assertContains("Test d'indexation", content);
+          assertContains("http://www.apache.org", content);
        } finally {
           parser.close();
        }
@@ -117,6 +129,7 @@ public class ForkParserIntegrationTest extends TestCase {
           for (StackTraceElement ste : e.getStackTrace()) {
              if (ste.getClassName().equals(ForkParser.class.getName())) {
                 found = true;
+                break;
              }
           }
           if (!found) {
@@ -144,9 +157,10 @@ public class ForkParserIntegrationTest extends TestCase {
      * TIKA-831 Parsers throwing errors should be caught and
      *  properly reported
      */
+    @Test
     public void testParsingErrorInForkedParserShouldBeReported() throws Exception {
         BrokenParser brokenParser = new BrokenParser();
-        Parser parser = new ForkParser(ForkParser.class.getClassLoader(), brokenParser);
+        ForkParser parser = new ForkParser(ForkParser.class.getClassLoader(), brokenParser);
         InputStream stream = getClass().getResourceAsStream("/test-documents/testTXT.txt");
         
         // With a serializable error, we'll get that back
@@ -157,6 +171,8 @@ public class ForkParserIntegrationTest extends TestCase {
             fail("Expected TikaException caused by Error");
         } catch (TikaException e) {
             assertEquals(brokenParser.err, e.getCause());
+        } finally {
+            parser.close();
         }
         
         // With a non serializable one, we'll get something else
@@ -179,6 +195,7 @@ public class ForkParserIntegrationTest extends TestCase {
      * If we supply a non serializable object on the ParseContext,
      *  check we get a helpful exception back
      */
+    @Test
     public void testParserHandlingOfNonSerializable() throws Exception {
        ForkParser parser = new ForkParser(
              ForkParserIntegrationTest.class.getClassLoader(),
@@ -210,6 +227,7 @@ public class ForkParserIntegrationTest extends TestCase {
     /**
      * TIKA-832
      */
+    @Test
     public void testAttachingADebuggerOnTheForkedParserShouldWork()
             throws Exception {
         ParseContext context = new ParseContext();
@@ -218,17 +236,16 @@ public class ForkParserIntegrationTest extends TestCase {
         ForkParser parser = new ForkParser(
                 ForkParserIntegrationTest.class.getClassLoader(),
                 tika.getParser());
-        parser.setJavaCommand(
-                "java -Xmx32m -Xdebug -Xrunjdwp:"
-                + "transport=dt_socket,address=54321,server=y,suspend=n");
+        parser.setJavaCommand(Arrays.asList("java", "-Xmx32m", "-Xdebug",
+                                            "-Xrunjdwp:transport=dt_socket,address=54321,server=y,suspend=n"));
         try {
             ContentHandler body = new BodyContentHandler();
             InputStream stream = ForkParserIntegrationTest.class.getResourceAsStream(
                     "/test-documents/testTXT.txt");
             parser.parse(stream, body, new Metadata(), context);
             String content = body.toString();
-            assertTrue(content.contains("Test d'indexation"));
-            assertTrue(content.contains("http://www.apache.org"));
+            assertContains("Test d'indexation", content);
+            assertContains("http://www.apache.org", content);
         } finally {
             parser.close();
         }
@@ -238,6 +255,7 @@ public class ForkParserIntegrationTest extends TestCase {
      * TIKA-808 - Ensure that parsing of our test PDFs work under
      * the Fork Parser, to ensure that complex parsing behaves
      */
+    @Test
     public void testForkedPDFParsing() throws Exception {
         ForkParser parser = new ForkParser(
                 ForkParserIntegrationTest.class.getClassLoader(),
@@ -247,15 +265,70 @@ public class ForkParserIntegrationTest extends TestCase {
             InputStream stream = ForkParserIntegrationTest.class.getResourceAsStream(
                     "/test-documents/testPDF.pdf");
             ParseContext context = new ParseContext();
+            context.set(Parser.class, new EmptyParser());
             parser.parse(stream, output, new Metadata(), context);
 
             String content = output.toString();
-            assertTrue(content.contains("Apache Tika"));
-            assertTrue(content.contains("Tika - Content Analysis Toolkit"));
-            assertTrue(content.contains("incubator"));
-            assertTrue(content.contains("Apache Software Foundation"));
+            assertContains("Apache Tika", content);
+            assertContains("Tika - Content Analysis Toolkit", content);
+            assertContains("incubator", content);
+            assertContains("Apache Software Foundation", content);
         } finally {
             parser.close();
         }
     }
+
+    @Test
+    public void testForkedPackageParsing() throws Exception {
+        ForkParser parser = new ForkParser(ForkParserIntegrationTest.class.getClassLoader(),
+            tika.getParser());
+        try {
+            ContentHandler output = new BodyContentHandler();
+            InputStream stream = ForkParserIntegrationTest.class.getResourceAsStream(
+                "/test-documents/moby.zip");
+            ParseContext context = new ParseContext();
+            parser.parse(stream, output, new Metadata(), context);
+            assertContains("Moby Dick", output.toString());
+        } finally {
+            parser.close();
+        }
+    }
+
+    @Test
+    @Ignore("use for development/one off testing.  This is a beast and takes enormous resources and time")
+    public void smokeTest() throws Exception {
+        RecursiveParserWrapper wrapper = new RecursiveParserWrapper(tika.getParser());
+        int numThreads = 5;
+        ForkParser parser = new ForkParser(ForkParserIntegrationTest.class.getClassLoader(),
+                wrapper);
+        parser.setServerPulseMillis(500);
+        parser.setServerParseTimeoutMillis(1000);
+        parser.setPoolSize(numThreads);
+        ParseContext[] parseContexts = new ParseContext[numThreads];
+        for (int i = 0; i < numThreads; i++) {
+            parseContexts[i] = new ParseContext();
+        }
+        try {
+            super.testMultiThreaded(parser, parseContexts, numThreads, 5,
+                    new FileFilter() {
+                        @Override
+                        public boolean accept(File pathname) {
+                            if (pathname.getAbsolutePath().contains("mock")) {
+                                return true;
+                            } else {
+                                return false;
+                            }/*
+                            if (pathname.getName().contains("11_hang.rar") ||
+                                    pathname.getName().contains("radar_profiles_2009.mat") ||
+                                    pathname.getAbsolutePath().contains("mock")) {
+                                //return false;
+                            }
+                            return true;*/
+                        }
+                    });
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+
 }

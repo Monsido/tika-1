@@ -16,6 +16,8 @@
  */
 package org.apache.tika.fork;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -23,21 +25,26 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.NotSerializableException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipEntry;
 
 import org.apache.tika.exception.TikaException;
-import org.apache.tika.io.IOExceptionWithCause;
 import org.apache.tika.io.IOUtils;
+import org.apache.tika.sax.AbstractRecursiveParserWrapperHandler;
+import org.apache.tika.sax.RecursiveParserWrapperHandler;
+import org.apache.tika.utils.ProcessUtils;
 import org.xml.sax.ContentHandler;
 
 class ForkClient {
+    private static AtomicInteger CLIENT_COUNTER = new AtomicInteger(0);
 
-    private final List<ForkResource> resources = new ArrayList<ForkResource>();
+    private final List<ForkResource> resources = new ArrayList<>();
 
     private final ClassLoader loader;
 
@@ -49,9 +56,78 @@ class ForkClient {
 
     private final DataInputStream input;
 
-    private final InputStream error;
+    //this is used for debugging/smoke testing
+    private final int id = CLIENT_COUNTER.incrementAndGet();
 
-    public ForkClient(ClassLoader loader, Object object, String java)
+    private volatile int filesProcessed = 0;
+
+    public ForkClient(Path tikaDir, ParserFactoryFactory parserFactoryFactory, List<String> java,
+                      TimeoutLimits timeoutLimits) throws IOException, TikaException {
+        this(tikaDir, parserFactoryFactory, null, java, timeoutLimits);
+    }
+    /**
+     *
+     * @param tikaDir directory containing jars from which to start the child server and load the Parser
+     * @param parserFactoryFactory factory to send to child process to build parser upon arrival
+     * @param classLoader class loader to use for non-parser resource (content-handler, etc.)
+     * @param java java commandline to use for the commandline server
+     * @throws IOException
+     * @throws TikaException
+     */
+    public ForkClient(Path tikaDir, ParserFactoryFactory parserFactoryFactory, ClassLoader classLoader,
+                      List<String> java, TimeoutLimits timeoutLimits) throws IOException, TikaException {
+        jar = null;
+        loader = null;
+        boolean ok = false;
+        ProcessBuilder builder = new ProcessBuilder();
+        List<String> command = new ArrayList<>();
+        command.addAll(java);
+        command.add("-cp");
+        String dirString = tikaDir.toAbsolutePath().toString();
+        if (!dirString.endsWith("/")) {
+            dirString += "/*";
+        } else {
+            dirString += "/";
+        }
+        dirString = ProcessUtils.escapeCommandLine(dirString);
+        command.add(dirString);
+        command.add("org.apache.tika.fork.ForkServer");
+        command.add(Long.toString(timeoutLimits.getPulseMS()));
+        command.add(Long.toString(timeoutLimits.getParseTimeoutMS()));
+        command.add(Long.toString(timeoutLimits.getWaitTimeoutMS()));
+        builder.command(command);
+        builder.redirectError(ProcessBuilder.Redirect.INHERIT);
+        try {
+            this.process = builder.start();
+
+            this.output = new DataOutputStream(process.getOutputStream());
+            this.input = new DataInputStream(process.getInputStream());
+
+            waitForStartBeacon();
+            if (classLoader != null) {
+                output.writeByte(ForkServer.INIT_PARSER_FACTORY_FACTORY_LOADER);
+            } else {
+                output.writeByte(ForkServer.INIT_PARSER_FACTORY_FACTORY);
+            }
+            output.flush();
+            sendObject(parserFactoryFactory, resources);
+            if (classLoader != null) {
+                sendObject(classLoader, resources);
+            }
+            waitForStartBeacon();
+            ok = true;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            throw t;
+        } finally {
+            if (!ok) {
+                close();
+            }
+        }
+    }
+
+
+    public ForkClient(ClassLoader loader, Object object, List<String> java, TimeoutLimits timeoutLimits)
             throws IOException, TikaException {
         boolean ok = false;
         try {
@@ -59,21 +135,26 @@ class ForkClient {
             this.jar = createBootstrapJar();
 
             ProcessBuilder builder = new ProcessBuilder();
-            List<String> command = new ArrayList<String>();
-            command.addAll(Arrays.asList(java.split("\\s+")));
+            List<String> command = new ArrayList<>();
+            command.addAll(java);
             command.add("-jar");
             command.add(jar.getPath());
+            command.add(Long.toString(timeoutLimits.getPulseMS()));
+            command.add(Long.toString(timeoutLimits.getParseTimeoutMS()));
+            command.add(Long.toString(timeoutLimits.getWaitTimeoutMS()));
             builder.command(command);
+            builder.redirectError(ProcessBuilder.Redirect.INHERIT);
             this.process = builder.start();
 
             this.output = new DataOutputStream(process.getOutputStream());
             this.input = new DataInputStream(process.getInputStream());
-            this.error = process.getErrorStream();
 
             waitForStartBeacon();
-
+            output.writeByte(ForkServer.INIT_LOADER_PARSER);
+            output.flush();
             sendObject(loader, resources);
             sendObject(object, resources);
+            waitForStartBeacon();
 
             ok = true;
         } finally {
@@ -85,11 +166,16 @@ class ForkClient {
 
     private void waitForStartBeacon() throws IOException {
         while (true) {
-            consumeErrorStream();
             int type = input.read();
             if ((byte) type == ForkServer.READY) {
-                consumeErrorStream();
                 return;
+            } else if ((byte)type == ForkServer.FAILED_TO_START) {
+                throw new IOException("Server had a catastrophic initialization failure");
+            } else if (type == -1) {
+                throw new IOException("EOF while waiting for start beacon");
+            } else {
+                //can't do this because of ForkParserIntegrationTest#testAttachingADebuggerOnTheForkedParserShouldWork
+//                throw new IOException("Unexpected byte while waiting for start beacon: "+type);
             }
         }
     }
@@ -99,10 +185,8 @@ class ForkClient {
             output.writeByte(ForkServer.PING);
             output.flush();
             while (true) {
-                consumeErrorStream();
                 int type = input.read();
                 if (type == ForkServer.PING) {
-                    consumeErrorStream();
                     return true;
                 } else {
                     return false;
@@ -116,13 +200,18 @@ class ForkClient {
 
     public synchronized Throwable call(String method, Object... args)
             throws IOException, TikaException {
-        List<ForkResource> r = new ArrayList<ForkResource>(resources);
+        filesProcessed++;
+        List<ForkResource> r = new ArrayList<>(resources);
         output.writeByte(ForkServer.CALL);
         output.writeUTF(method);
         for (int i = 0; i < args.length; i++) {
             sendObject(args[i], r);
         }
         return waitForResponse(r);
+    }
+
+    public int getFilesProcessed() {
+        return filesProcessed;
     }
 
     /**
@@ -139,7 +228,11 @@ class ForkClient {
         if (object instanceof InputStream) {
             resources.add(new InputStreamResource((InputStream) object));
             object = new InputStreamProxy(n);
-        } else if (object instanceof ContentHandler) {
+        } else if (object instanceof RecursiveParserWrapperHandler) {
+            resources.add(new RecursiveMetadataContentHandlerResource((RecursiveParserWrapperHandler) object));
+            object = new RecursiveMetadataContentHandlerProxy(n, ((RecursiveParserWrapperHandler)object).getContentHandlerFactory());
+        } else if (object instanceof ContentHandler
+                && ! (object instanceof AbstractRecursiveParserWrapperHandler)) {
             resources.add(new ContentHandlerResource((ContentHandler) object));
             object = new ContentHandlerProxy(n);
         } else if (object instanceof ClassLoader) {
@@ -148,7 +241,7 @@ class ForkClient {
         }
 
         try {
-           ForkObjectInputStream.sendObject(object, output);
+            ForkObjectInputStream.sendObject(object, output);
         } catch(NotSerializableException nse) {
            // Build a more friendly error message for this
            throw new TikaException(
@@ -167,13 +260,16 @@ class ForkClient {
             if (input != null) {
                 input.close();
             }
-            if (error != null) {
-                error.close();
-            }
         } catch (IOException ignore) {
         }
         if (process != null) {
-            process.destroy();
+            process.destroyForcibly();
+            try {
+                //TIKA-1933
+                process.waitFor();
+            } catch (InterruptedException e) {
+
+            }
         }
         if (jar != null) {
             jar.delete();
@@ -183,11 +279,9 @@ class ForkClient {
     private Throwable waitForResponse(List<ForkResource> resources)
             throws IOException {
         output.flush();
-        while (true) {
-            consumeErrorStream();
+        while (!Thread.currentThread().isInterrupted()) {
             int type = input.read();
             if (type == -1) {
-                consumeErrorStream();
                 throw new IOException(
                         "Lost connection to a forked server process");
             } else if (type == ForkServer.RESOURCE) {
@@ -199,33 +293,14 @@ class ForkClient {
                     return (Throwable) ForkObjectInputStream.readObject(
                             input, loader);
                 } catch (ClassNotFoundException e) {
-                    throw new IOExceptionWithCause(
+                    throw new IOException(
                             "Unable to deserialize an exception", e);
                 }
             } else {
                 return null;
             }
         }
-    }
-
-    /**
-     * Consumes all pending bytes from the standard error stream of the
-     * forked server process, and prints them out to the standard error
-     * stream of this process. This method should be called always before
-     * expecting some output from the server, to prevent the server from
-     * blocking due to a filled up pipe buffer of the error stream.
-     *
-     * @throws IOException if the error stream could not be read
-     */
-    private void consumeErrorStream() throws IOException {
-        int n;
-        while ((n = error.available()) > 0) {
-            byte[] b = new byte[n];
-            n = error.read(b);
-            if (n > 0) {
-                System.err.write(b, 0, n);
-            }
-        }
+        throw new IOException(new InterruptedException());
     }
 
     /**
@@ -236,7 +311,7 @@ class ForkClient {
      * @throws IOException if the bootstrap archive could not be created
      */
     private static File createBootstrapJar() throws IOException {
-        File file = File.createTempFile("apache-tika-fork-", ".jar");
+        File file = Files.createTempFile("apache-tika-fork-", ".jar").toFile();
         boolean ok = false;
         try {
             fillBootstrapJar(file);
@@ -258,12 +333,10 @@ class ForkClient {
      * @throws IOException if the bootstrap archive could not be created
      */
     private static void fillBootstrapJar(File file) throws IOException {
-        JarOutputStream jar = new JarOutputStream(new FileOutputStream(file));
-        try {
-            String manifest =
-                "Main-Class: " + ForkServer.class.getName() + "\n";
+        try (JarOutputStream jar = new JarOutputStream(new FileOutputStream(file))) {
+            String manifest = "Main-Class: " + ForkServer.class.getName() + "\n";
             jar.putNextEntry(new ZipEntry("META-INF/MANIFEST.MF"));
-            jar.write(manifest.getBytes("UTF-8"));
+            jar.write(manifest.getBytes(UTF_8));
 
             Class<?>[] bootstrap = {
                     ForkServer.class, ForkObjectInputStream.class,
@@ -271,22 +344,20 @@ class ForkClient {
                     MemoryURLConnection.class,
                     MemoryURLStreamHandler.class,
                     MemoryURLStreamHandlerFactory.class,
-                    MemoryURLStreamRecord.class
+                    MemoryURLStreamRecord.class, TikaException.class
             };
             ClassLoader loader = ForkServer.class.getClassLoader();
             for (Class<?> klass : bootstrap) {
                 String path = klass.getName().replace('.', '/') + ".class";
-                InputStream input = loader.getResourceAsStream(path);
-                try {
+                try (InputStream input = loader.getResourceAsStream(path)) {
                     jar.putNextEntry(new JarEntry(path));
                     IOUtils.copy(input, jar);
-                } finally {
-                    input.close();
                 }
             }
-        } finally {
-            jar.close();
         }
     }
 
+    public int getId() {
+        return id;
+    }
 }

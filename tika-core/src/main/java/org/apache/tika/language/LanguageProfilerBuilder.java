@@ -17,6 +17,8 @@
 package org.apache.tika.language;
 
 // JDK imports
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
@@ -33,6 +35,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+
 import org.apache.tika.exception.TikaException;
 
 /**
@@ -45,7 +48,9 @@ import org.apache.tika.exception.TikaException;
  * 
  * @author Sami Siren
  * @author Jerome Charron - http://frutch.free.fr/
+ * @deprecated
  */
+@Deprecated
 public class LanguageProfilerBuilder {
 
     // public static final Log LOG =
@@ -171,8 +176,7 @@ public class LanguageProfilerBuilder {
     /**
      * Adds ngrams from a single word in this profile
      * 
-     * @param word is the word to add
-     * @param n is the ngram size
+     * @param cs char sequence to add
      */
     private void add(CharSequence cs) {
 
@@ -341,7 +345,7 @@ public class LanguageProfilerBuilder {
 
         ngrams.clear();
         ngramcounts = new int[maxLength + 1];
-        BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(is, UTF_8));
         String line = null;
 
         while ((line = reader.readLine()) != null) {
@@ -405,7 +409,7 @@ public class LanguageProfilerBuilder {
      */
     public void save(OutputStream os) throws IOException {
         os.write(("# NgramProfile generated at " + new Date() + 
-                  " for Apache Tika Language Identification\n").getBytes());
+                  " for Apache Tika Language Identification\n").getBytes(UTF_8));
 
         // And then each ngram
 
@@ -432,7 +436,7 @@ public class LanguageProfilerBuilder {
         for (int i = 0; i < list.size(); i++) {
             NGramEntry e = list.get(i);
             String line = e.toString() + " " + e.getCount() + "\n";
-            os.write(line.getBytes("UTF-8"));
+            os.write(line.getBytes(UTF_8));
         }
         os.flush();
     }

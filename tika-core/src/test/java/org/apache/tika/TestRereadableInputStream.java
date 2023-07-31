@@ -22,12 +22,14 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 
 import org.apache.tika.utils.RereadableInputStream;
+import org.junit.Test;
 
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
 
-public class TestRereadableInputStream extends TestCase {
+public class TestRereadableInputStream {
 
     private final int TEST_SIZE = 3;
 
@@ -35,6 +37,7 @@ public class TestRereadableInputStream extends TestCase {
 
     private final int NUM_PASSES = 4;
 
+    @Test
     public void test() throws IOException {
 
         InputStream is = createTestInputStream();
@@ -63,6 +66,7 @@ public class TestRereadableInputStream extends TestCase {
      * 
      * @throws IOException
      */
+    @Test
     public void testRewind() throws IOException {
         doTestRewind(true);
         doTestRewind(false);
@@ -95,7 +99,7 @@ public class TestRereadableInputStream extends TestCase {
     }
 
     private File createTestFile() throws IOException {
-        File testfile = File.createTempFile("TIKA_ris_test", ".tmp");
+        File testfile = Files.createTempFile("TIKA_ris_test", ".tmp").toFile();
         testfile.deleteOnExit();
         FileOutputStream fos = new FileOutputStream(testfile);
         for (int i = 0; i < TEST_SIZE; i++) {
@@ -105,7 +109,7 @@ public class TestRereadableInputStream extends TestCase {
         return testfile;
     }
 
-
+    @Test
     public void testCloseBehavior() throws IOException {
         doACloseBehaviorTest(true);
         doACloseBehaviorTest(false);

@@ -895,3 +895,8 @@ juniversalchardet library (juniversalchardet)
          the notices in the Source Code files of the Original Code. You should
          use the text of this Exhibit A rather than the text found in the
          Original Code Source Code for Your Modifications.]
+
+Sqlite (included in the "provided" org.xerial's sqlite-jdbc)
+    Sqlite is in the Public Domain.  For details
+    see: https://www.sqlite.org/copyright.html
+

@@ -16,29 +16,37 @@
  */
 package org.apache.tika.mime;
 
+import static java.nio.charset.StandardCharsets.UTF_16BE;
+import static java.nio.charset.StandardCharsets.UTF_16LE;
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-
-import junit.framework.TestCase;
+import java.net.URL;
 
 import org.apache.tika.config.TikaConfig;
 import org.apache.tika.metadata.Metadata;
+import org.apache.tika.metadata.TikaCoreProperties;
+import org.junit.Before;
+import org.junit.Test;
 
-public class MimeDetectionTest extends TestCase {
+public class MimeDetectionTest {
 
     private MimeTypes mimeTypes;
 
     private MediaTypeRegistry registry;
 
     /** @inheritDoc */
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
+    @Before
+    public void setUp() {
         this.mimeTypes = TikaConfig.getDefaultConfig().getMimeRepository();
         this.registry = mimeTypes.getMediaTypeRegistry();
     }
 
+    @Test
     public void testDetection() throws Exception {
         testFile("image/svg+xml", "circles.svg");
         testFile("image/svg+xml", "circles-with-prefix.svg");
@@ -60,23 +68,52 @@ public class MimeDetectionTest extends TestCase {
                 "http://www.w3.org/2002/07/owl#",
                 "test-difficult-rdf2.xml");
         // add evil test from TIKA-327
-        testFile("text/html", "evilhtml.html");
+        testFile("text/html", "test-tika-327.html");
         // add another evil html test from TIKA-357
         testFile("text/html", "testlargerbuffer.html");
+        // test fragment of HTML with <div> (TIKA-1102)
+        testFile("text/html", "htmlfragment");
+        // test binary CGM detection (TIKA-1170)
+        testFile("image/cgm", "plotutils-bin-cgm-v3.cgm");
+        // test HTML detection of malformed file, previously identified as image/cgm (TIKA-1170)
+        testFile("text/html", "test-malformed-header.html.bin");
+        
+        //test GCMD Directory Interchange Format (.dif) TIKA-1561
+        testFile("application/dif+xml", "brwNIMS_2014.dif");
+
+        // truncated xml should still be detected as xml, See TIKA-3596
+        testFile("application/xml", "truncated-utf16-xml.xyz");
     }
 
+    @Test
+    public void testDetectionWithoutContent() throws IOException {
+        testUrlWithoutContent("text/html", "test.html");
+        testUrlWithoutContent("text/html", "http://test.com/test.html");
+        testUrlWithoutContent("text/plain", "http://test.com/test.txt");
+
+        // In case the url contains a filename referencing a server-side scripting language,
+        // it gives us no clue concerning the actual mime type of the response
+        testUrlWithoutContent("application/octet-stream", "http://test.com/test.php");
+        testUrlWithoutContent("application/octet-stream", "http://test.com/test.cgi");
+        testUrlWithoutContent("application/octet-stream", "http://test.com/test.jsp");
+        // But in case the protocol is not http or https, the script is probably not interpreted
+        testUrlWithoutContent("text/x-php", "ftp://test.com/test.php");
+    }
+
+    @Test
     public void testByteOrderMark() throws Exception {
         assertEquals(MediaType.TEXT_PLAIN, mimeTypes.detect(
-                new ByteArrayInputStream("\ufefftest".getBytes("UTF-16LE")),
+                new ByteArrayInputStream("\ufefftest".getBytes(UTF_16LE)),
                 new Metadata()));
         assertEquals(MediaType.TEXT_PLAIN, mimeTypes.detect(
-                new ByteArrayInputStream("\ufefftest".getBytes("UTF-16BE")),
+                new ByteArrayInputStream("\ufefftest".getBytes(UTF_16BE)),
                 new Metadata()));
         assertEquals(MediaType.TEXT_PLAIN, mimeTypes.detect(
-                new ByteArrayInputStream("\ufefftest".getBytes("UTF-8")),
+                new ByteArrayInputStream("\ufefftest".getBytes(UTF_8)),
                 new Metadata()));
     }
 
+    @Test
     public void testSuperTypes() {
         assertTrue(registry.isSpecializationOf(
                 MediaType.parse("text/something; charset=UTF-8"),
@@ -111,6 +148,19 @@ public class MimeDetectionTest extends TestCase {
                 MediaType.APPLICATION_ZIP));
     }
 
+    @SuppressWarnings("unused")
+    private void testUrlOnly(String expected, String url) throws IOException{
+	InputStream in = new URL(url).openStream();
+        testStream(expected, url, in);
+    }
+
+    private void testUrlWithoutContent(String expected, String url) throws IOException {
+        Metadata metadata = new Metadata();
+        metadata.set(Metadata.RESOURCE_NAME_KEY, url);
+        String mime = this.mimeTypes.detect(null, metadata).toString();
+        assertEquals(url + " is not properly detected using only resource name", expected, mime);
+    }
+
     private void testUrl(String expected, String url, String file) throws IOException{
         InputStream in = getClass().getResourceAsStream(file);
         testStream(expected, url, in);
@@ -140,11 +190,17 @@ public class MimeDetectionTest extends TestCase {
         }        
     }
 
+    private void assertNotNull(String string, InputStream in) {
+      // TODO Auto-generated method stub
+      
+    }
+
     /**
      * Test for type detection of empty documents.
      *
      * @see <a href="https://issues.apache.org/jira/browse/TIKA-483">TIKA-483</a>
      */
+    @Test
     public void testEmptyDocument() throws IOException {
         assertEquals(MediaType.OCTET_STREAM, mimeTypes.detect(
                 new ByteArrayInputStream(new byte[0]), new Metadata()));
@@ -167,9 +223,10 @@ public class MimeDetectionTest extends TestCase {
      *
      * @see <a href="https://issues.apache.org/jira/browse/TIKA-426">TIKA-426</a>
      */
+    @Test
     public void testNotXML() throws IOException {
         assertEquals(MediaType.TEXT_PLAIN, mimeTypes.detect(
-                new ByteArrayInputStream("<!-- test -->".getBytes("UTF-8")),
+                new ByteArrayInputStream("<!-- test -->".getBytes(UTF_8)),
                 new Metadata()));
     }
 
@@ -178,10 +235,38 @@ public class MimeDetectionTest extends TestCase {
      *  that can be detected with Mime Magic, that we consistently
      *  detect it correctly. See TIKA-391 for more details.
      */
+    @Test
     public void testMimeMagicStability() throws IOException {
        for(int i=0; i<100; i++) {
           testFile("application/vnd.ms-excel", "test.xls");
        }
     }
 
+    /**
+     * Tests that when two magic matches both apply, and both
+     *  have the same priority, we use the name to pick the
+     *  right one based on the glob, or the first one we
+     *  come across if not. See TIKA-1292 for more details.
+     */
+    @Test    
+    public void testMimeMagicClashSamePriority() throws IOException {
+        byte[] helloWorld = "Hello, World!".getBytes(UTF_8);
+        MediaType helloType = MediaType.parse("hello/world-file");
+        MediaType helloXType = MediaType.parse("hello/x-world-hello");
+        Metadata metadata;
+        
+        // With a filename, picks the right one
+        metadata = new Metadata();
+        metadata.set(Metadata.RESOURCE_NAME_KEY, "test.hello.world");
+        assertEquals(helloType, mimeTypes.detect(new ByteArrayInputStream(helloWorld), metadata));
+        
+        metadata = new Metadata();
+        metadata.set(Metadata.RESOURCE_NAME_KEY, "test.x-hello-world");
+        assertEquals(helloXType, mimeTypes.detect(new ByteArrayInputStream(helloWorld), metadata));
+        
+        // Without, goes for the one that sorts last
+        metadata = new Metadata();
+        metadata.set(Metadata.RESOURCE_NAME_KEY, "testingTESTINGtesting");
+        assertEquals(helloXType, mimeTypes.detect(new ByteArrayInputStream(helloWorld), metadata));
+    }
 }

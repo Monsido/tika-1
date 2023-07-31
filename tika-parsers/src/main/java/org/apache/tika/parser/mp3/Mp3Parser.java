@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.io.TailStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.metadata.XMPDM;
@@ -64,77 +65,97 @@ public class Mp3Parser extends AbstractParser {
         metadata.set(XMPDM.AUDIO_COMPRESSOR, "MP3");
 
         XHTMLContentHandler xhtml = new XHTMLContentHandler(handler, metadata);
-        xhtml.startDocument();
 
         // Create handlers for the various kinds of ID3 tags
         ID3TagsAndAudio audioAndTags = getAllTagHandlers(stream, handler);
 
-        if (audioAndTags.tags.length > 0) {
-           CompositeTagHandler tag = new CompositeTagHandler(audioAndTags.tags);
-
-           metadata.set(TikaCoreProperties.TITLE, tag.getTitle());
-           metadata.set(TikaCoreProperties.CREATOR, tag.getArtist());
-           metadata.set(XMPDM.ARTIST, tag.getArtist());
-           metadata.set(XMPDM.COMPOSER, tag.getComposer());
-           metadata.set(XMPDM.ALBUM, tag.getAlbum());
-           metadata.set(XMPDM.RELEASE_DATE, tag.getYear());
-           metadata.set(XMPDM.GENRE, tag.getGenre());
-           
-           List<String> comments = new ArrayList<String>();
-           for (ID3Comment comment : tag.getComments()) {
-              StringBuffer cmt = new StringBuffer();
-              if (comment.getLanguage() != null) {
-                 cmt.append(comment.getLanguage());
-                 cmt.append(" - ");
-              }
-              if (comment.getDescription() != null) {
-                 cmt.append(comment.getDescription());
-                 if (comment.getText() != null) {
-                    cmt.append("\n");
-                 }
-              }
-              if (comment.getText() != null) {
-                 cmt.append(comment.getText());
-              }
-              
-              comments.add(cmt.toString());
-              metadata.add(XMPDM.LOG_COMMENT.getName(), cmt.toString());
-           }
-
-           xhtml.element("h1", tag.getTitle());
-           xhtml.element("p", tag.getArtist());
-
-            // ID3v1.1 Track addition
-            if (tag.getTrackNumber() != null) {
-                xhtml.element("p", tag.getAlbum() + ", track " + tag.getTrackNumber());
-                metadata.set(XMPDM.TRACK_NUMBER, tag.getTrackNumber());
-            } else {
-                xhtml.element("p", tag.getAlbum());
-            }
-            xhtml.element("p", tag.getYear());
-            xhtml.element("p", tag.getGenre());
-            for (String comment : comments) {
-               xhtml.element("p", comment);
-            }
+        // Before we start on the XHTML output, process and store
+        //  as much metadata as possible
+        if (audioAndTags.duration > 0) {
+           metadata.set(XMPDM.DURATION, audioAndTags.durationSeconds());
         }
+
         if (audioAndTags.audio != null) {
             metadata.set("samplerate", String.valueOf(audioAndTags.audio.getSampleRate()));
             metadata.set("channels", String.valueOf(audioAndTags.audio.getChannels()));
             metadata.set("version", audioAndTags.audio.getVersion());
-            
+
             metadata.set(
                     XMPDM.AUDIO_SAMPLE_RATE,
                     Integer.toString(audioAndTags.audio.getSampleRate()));
             if(audioAndTags.audio.getChannels() == 1) {
-               metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "Mono");
+                metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "Mono");
             } else if(audioAndTags.audio.getChannels() == 2) {
-               metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "Stereo");
+                metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "Stereo");
             } else if(audioAndTags.audio.getChannels() == 5) {
-               metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "5.1");
+                metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "5.1");
             } else if(audioAndTags.audio.getChannels() == 7) {
-               metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "7.1");
+                metadata.set(XMPDM.AUDIO_CHANNEL_TYPE, "7.1");
             }
         }
+
+        xhtml.startDocument();
+        // Process tags metadata if the file has supported tags
+        List<String> comments = new ArrayList<>();
+        if (audioAndTags.tags.length > 0) {
+            CompositeTagHandler tag = new CompositeTagHandler(audioAndTags.tags);
+
+            metadata.set(TikaCoreProperties.TITLE, tag.getTitle());
+            metadata.set(TikaCoreProperties.CREATOR, tag.getArtist());
+            metadata.set(XMPDM.ARTIST, tag.getArtist());
+            metadata.set(XMPDM.ALBUM_ARTIST, tag.getAlbumArtist());
+            metadata.set(XMPDM.COMPOSER, tag.getComposer());
+            metadata.set(XMPDM.ALBUM, tag.getAlbum());
+            metadata.set(XMPDM.COMPILATION, tag.getCompilation());
+            metadata.set(XMPDM.RELEASE_DATE, tag.getYear());
+            metadata.set(XMPDM.GENRE, tag.getGenre());
+
+            for (ID3Comment comment : tag.getComments()) {
+                StringBuffer cmt = new StringBuffer();
+                if (comment.getLanguage() != null) {
+                    cmt.append(comment.getLanguage());
+                    cmt.append(" - ");
+                }
+                if (comment.getDescription() != null) {
+                    cmt.append(comment.getDescription());
+                    if (comment.getText() != null) {
+                        cmt.append("\n");
+                    }
+                }
+                if (comment.getText() != null) {
+                    cmt.append(comment.getText());
+                }
+
+                comments.add(cmt.toString());
+                metadata.add(XMPDM.LOG_COMMENT.getName(), cmt.toString());
+            }
+
+            // ID3v1.1 Track addition
+            StringBuilder sb = new StringBuilder();
+            sb.append(tag.getAlbum());
+            if (tag.getTrackNumber() != null) {
+                sb.append(", track ").append(tag.getTrackNumber());
+                metadata.set(XMPDM.TRACK_NUMBER, tag.getTrackNumber());
+            }
+            if (tag.getDisc() != null) {
+                sb.append(", disc ").append(tag.getDisc());
+                metadata.set(XMPDM.DISC_NUMBER, tag.getDisc());
+            }
+
+            xhtml.element("h1", tag.getTitle());
+            xhtml.element("p", tag.getArtist());
+
+
+            xhtml.element("p", sb.toString());
+
+            xhtml.element("p", tag.getYear());
+            xhtml.element("p", tag.getGenre());
+        }
+        xhtml.element("p", String.valueOf(audioAndTags.durationSeconds()));
+        for (String comment : comments) {
+            xhtml.element("p", comment);
+        }
+
         if (audioAndTags.lyrics != null && audioAndTags.lyrics.hasLyrics()) {
            xhtml.startElement("p", "class", "lyrics");
            xhtml.characters(audioAndTags.lyrics.lyricsText);
@@ -157,11 +178,14 @@ public class Mp3Parser extends AbstractParser {
        LyricsHandler lyrics = null;
        AudioFrame firstAudio = null;
 
+       TailStream tailStream = new TailStream(stream, 10240+128);
+       MpegStream mpegStream = new MpegStream(tailStream);
+
        // ID3v2 tags live at the start of the file
        // You can apparently have several different ID3 tag blocks
        // So, keep going until we don't find any more
        MP3Frame f;
-       while ((f = ID3v2Frame.createFrameIfPresent(stream)) != null && firstAudio == null) {
+       while ((f = ID3v2Frame.createFrameIfPresent(mpegStream)) != null) {
            if(f instanceof ID3v2Frame) {
                ID3v2Frame id3F = (ID3v2Frame)f;
                if (id3F.getMajorVersion() == 4) {
@@ -171,15 +195,30 @@ public class Mp3Parser extends AbstractParser {
                } else if(id3F.getMajorVersion() == 2) {
                    v22 = new ID3v22Handler(id3F);
                }
-           } else if(f instanceof AudioFrame) {
-               firstAudio = (AudioFrame)f;
            }
        }
+
+        // Now iterate over all audio frames in the file
+        AudioFrame frame = mpegStream.nextFrame();
+        float duration = 0;
+        boolean skipped = true;
+        while (frame != null && skipped)
+        {
+            duration += frame.getDuration();
+            if (firstAudio == null)
+            {
+                firstAudio = frame;
+            }
+            skipped = mpegStream.skipFrame();
+            if (skipped) {
+                frame = mpegStream.nextFrame();
+            }
+        }
 
        // ID3v1 tags live at the end of the file
        // Lyrics live just before ID3v1, at the end of the file
        // Search for both (handlers seek to the end for us)
-       lyrics = new LyricsHandler(stream, handler);
+       lyrics = new LyricsHandler(tailStream.getTail());
        v1 = lyrics.id3v1;
 
        // Go in order of preference
@@ -203,6 +242,7 @@ public class Mp3Parser extends AbstractParser {
        ret.audio = firstAudio;
        ret.lyrics = lyrics;
        ret.tags = tags.toArray(new ID3Tags[tags.size()]);
+       ret.duration = duration;
        return ret;
     }
 
@@ -210,6 +250,10 @@ public class Mp3Parser extends AbstractParser {
         private ID3Tags[] tags;
         private AudioFrame audio;
         private LyricsHandler lyrics;
+        private float duration; // Milliseconds
+        private float durationSeconds() {
+           return duration / 1000;
+        }
     }
 
 }

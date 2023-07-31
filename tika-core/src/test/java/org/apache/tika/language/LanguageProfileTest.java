@@ -16,12 +16,17 @@
  */
 package org.apache.tika.language;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.io.IOException;
 
-import junit.framework.TestCase;
+import org.junit.Test;
 
-public class LanguageProfileTest extends TestCase {
+@Deprecated
+public class LanguageProfileTest {
 
+    @Test
     public void testLanguageProfile() throws IOException {
         LanguageProfile foo = new LanguageProfile();
         assertEquals(0, foo.getCount("foo"));
@@ -33,13 +38,13 @@ public class LanguageProfileTest extends TestCase {
         assertEquals(4, foo.getCount("foo"));
 
         LanguageProfile bar = new LanguageProfile();
-        assertEquals(1.0, foo.distance(bar));
+        assertEquals(1.0, foo.distance(bar), 1e-8);
 
         bar.add("bar");
-        assertEquals(Math.sqrt(2.0), foo.distance(bar));
+        assertEquals(Math.sqrt(2.0), foo.distance(bar), 1e-8);
 
         bar.add("bar", 3);
-        assertEquals(Math.sqrt(2.0), foo.distance(bar));
+        assertEquals(Math.sqrt(2.0), foo.distance(bar), 1e-8);
 
         LanguageProfile foobar = new LanguageProfile();
         assertTrue(foo.distance(foobar) == bar.distance(foobar));

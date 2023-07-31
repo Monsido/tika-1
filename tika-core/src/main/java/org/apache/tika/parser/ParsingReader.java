@@ -26,8 +26,11 @@ import java.io.PipedReader;
 import java.io.PipedWriter;
 import java.io.Reader;
 import java.io.Writer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.Executor;
 
+import org.apache.tika.exception.ZeroByteFileException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.ContentHandler;
@@ -119,11 +122,23 @@ public class ParsingReader extends Reader {
     }
 
     /**
+     * Creates a reader for the text content of the file at the given path.
+     *
+     * @param path path
+     * @throws FileNotFoundException if the given file does not exist
+     * @throws IOException if the document can not be parsed
+     */
+    public ParsingReader(Path path) throws IOException {
+        this(Files.newInputStream(path), path.getFileName().toString());
+    }
+
+    /**
      * Creates a reader for the text content of the given file.
      *
      * @param file file
      * @throws FileNotFoundException if the given file does not exist
      * @throws IOException if the document can not be parsed
+     * @see #ParsingReader(Path)
      */
     public ParsingReader(File file) throws FileNotFoundException, IOException {
         this(new FileInputStream(file), file.getName());
@@ -254,7 +269,9 @@ public class ParsingReader extends Reader {
      */
     @Override
     public int read(char[] cbuf, int off, int len) throws IOException {
-        if (throwable instanceof IOException) {
+        if (throwable instanceof ZeroByteFileException) {
+            return -1;
+        } else if (throwable instanceof IOException) {
             throw (IOException) throwable;
         } else if (throwable != null) {
             IOException exception = new IOException("");

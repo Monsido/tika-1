@@ -16,22 +16,51 @@
  */
 package org.apache.tika.parser.feed;
 
-import java.io.InputStream;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
-import junit.framework.TestCase;
+import java.io.InputStream;
 
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.sax.BodyContentHandler;
+import org.junit.Test;
 import org.xml.sax.ContentHandler;
 
-public class FeedParserTest extends TestCase {
+public class FeedParserTest {
+    @Test
+    public void testRSSParser() throws Exception {
+        // These RSS files should have basically the same contents,
+        //  represented in the various RSS format versions
+        for (String rssFile : new String[] {
+                "/test-documents/rsstest_091.rss",
+                "/test-documents/rsstest_20.rss"
+        }) {
+            try (InputStream input = FeedParserTest.class.getResourceAsStream(rssFile)) {
+                Metadata metadata = new Metadata();
+                ContentHandler handler = new BodyContentHandler();
+                ParseContext context = new ParseContext();
+    
+                new FeedParser().parse(input, handler, metadata, context);
+    
+                String content = handler.toString();
+                assertFalse(content == null);
+    
+                assertEquals("Sample RSS File for Junit test",
+                        metadata.get(TikaCoreProperties.DESCRIPTION));
+                assertEquals("TestChannel", metadata.get(TikaCoreProperties.TITLE));
+    
+                // TODO find a way of testing the paragraphs and anchors
+            }
+        }
+    }
 
-    public void testXMLParser() throws Exception {
-        InputStream input = FeedParserTest.class
-                .getResourceAsStream("/test-documents/rsstest.rss");
-        try {
+
+    @Test
+    public void testAtomParser() throws Exception {
+        try (InputStream input = FeedParserTest.class.getResourceAsStream(
+                "/test-documents/testATOM.atom")) {
             Metadata metadata = new Metadata();
             ContentHandler handler = new BodyContentHandler();
             ParseContext context = new ParseContext();
@@ -41,14 +70,11 @@ public class FeedParserTest extends TestCase {
             String content = handler.toString();
             assertFalse(content == null);
 
-            assertEquals("Sample RSS File for Junit test",
+            assertEquals("Sample Atom File for Junit test",
                     metadata.get(TikaCoreProperties.DESCRIPTION));
-            assertEquals("TestChannel", metadata.get(TikaCoreProperties.TITLE));
+            assertEquals("Test Atom Feed", metadata.get(TikaCoreProperties.TITLE));
 
-            // TODO find a way of testing the paragraphs and anchors
-
-        } finally {
-            input.close();
+            // TODO Check some more
         }
     }
 

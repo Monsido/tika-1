@@ -30,6 +30,7 @@ import java.io.Reader;
 import java.io.StringWriter;
 import java.io.Writer;
 import java.nio.channels.Channel;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -75,7 +76,15 @@ import java.util.List;
  * @since Apache Tika 0.4, copied (partially) from Commons IO 1.4
  */
 public class IOUtils {
+    // TODO Remove this when we've finished TIKA-1706 and TIKA-1710
+    public static final Charset UTF_8 = java.nio.charset.StandardCharsets.UTF_8;
 
+    /**
+     * The default buffer size to use for the skip() methods.
+     */
+    private static final int SKIP_BUFFER_SIZE = 2048;
+
+    private static byte[] SKIP_BYTE_BUFFER;
     /**
      * The default buffer size to use.
      */
@@ -254,7 +263,7 @@ public class IOUtils {
      */
     @Deprecated
     public static byte[] toByteArray(String input) throws IOException {
-        return input.getBytes();
+        return input.getBytes(UTF_8);
     }
 
     // read char[]
@@ -392,7 +401,7 @@ public class IOUtils {
      */
     @Deprecated
     public static String toString(byte[] input) throws IOException {
-        return new String(input);
+        return new String(input, UTF_8);
     }
 
     /**
@@ -412,8 +421,9 @@ public class IOUtils {
     @Deprecated
     public static String toString(byte[] input, String encoding)
             throws IOException {
+        // If no encoding is specified, default to UTF-8.
         if (encoding == null) {
-            return new String(input);
+            return new String(input, UTF_8);
         } else {
             return new String(input, encoding);
         }
@@ -435,7 +445,7 @@ public class IOUtils {
      * @since Commons IO 1.1
      */
     public static List<String> readLines(InputStream input) throws IOException {
-        InputStreamReader reader = new InputStreamReader(input);
+        InputStreamReader reader = new InputStreamReader(input, UTF_8);
         return readLines(reader);
     }
 
@@ -529,7 +539,7 @@ public class IOUtils {
      * @since Commons IO 1.1
      */
     public static InputStream toInputStream(String input) {
-        byte[] bytes = input.getBytes();
+        byte[] bytes = input.getBytes(UTF_8);
         return new ByteArrayInputStream(bytes);
     }
 
@@ -547,7 +557,7 @@ public class IOUtils {
      * @since Commons IO 1.1
      */
     public static InputStream toInputStream(String input, String encoding) throws IOException {
-        byte[] bytes = encoding != null ? input.getBytes(encoding) : input.getBytes();
+        byte[] bytes = encoding != null ? input.getBytes(encoding) : input.getBytes(UTF_8);
         return new ByteArrayInputStream(bytes);
     }
 
@@ -585,7 +595,7 @@ public class IOUtils {
      */
     public static void write(byte[] data, Writer output) throws IOException {
         if (data != null) {
-            output.write(new String(data));
+            output.write(new String(data, UTF_8));
         }
     }
 
@@ -653,7 +663,7 @@ public class IOUtils {
     public static void write(char[] data, OutputStream output)
             throws IOException {
         if (data != null) {
-            output.write(new String(data).getBytes());
+            output.write(new String(data).getBytes(UTF_8));
         }
     }
 
@@ -779,7 +789,7 @@ public class IOUtils {
     public static void write(String data, OutputStream output)
             throws IOException {
         if (data != null) {
-            output.write(data.getBytes());
+            output.write(data.getBytes(UTF_8));
         }
     }
 
@@ -848,7 +858,7 @@ public class IOUtils {
     public static void write(StringBuffer data, OutputStream output)
             throws IOException {
         if (data != null) {
-            output.write(data.toString().getBytes());
+            output.write(data.toString().getBytes(UTF_8));
         }
     }
 
@@ -954,7 +964,7 @@ public class IOUtils {
      */
     public static void copy(InputStream input, Writer output)
             throws IOException {
-        InputStreamReader in = new InputStreamReader(input);
+        InputStreamReader in = new InputStreamReader(input, UTF_8);
         copy(in, output);
     }
 
@@ -1061,7 +1071,7 @@ public class IOUtils {
      */
     public static void copy(Reader input, OutputStream output)
             throws IOException {
-        OutputStreamWriter out = new OutputStreamWriter(output);
+        OutputStreamWriter out = new OutputStreamWriter(output, UTF_8);
         copy(input, out);
         // XXX Unless anyone is planning on rewriting OutputStreamWriter, we
         // have to flush here.
@@ -1179,4 +1189,99 @@ public class IOUtils {
         return (ch2 == -1);
     }
 
+    /**
+     * Reads bytes from an input stream.
+     * This implementation guarantees that it will read as many bytes
+     * as possible before giving up; this may not always be the case for
+     * subclasses of {@link InputStream}.
+     *
+     * @param input where to read input from
+     * @param buffer destination
+     * @param offset initial offset into buffer
+     * @param length length to read, must be &gt;= 0
+     * @return actual length read; may be less than requested if EOF was reached
+     * @throws IOException if a read error occurs
+     * @since 2.2
+     */
+    public static int read(final InputStream input, final byte[] buffer, final int offset, final int length)
+            throws IOException {
+        if (length < 0) {
+            throw new IllegalArgumentException("Length must not be negative: " + length);
+        }
+        int remaining = length;
+        while (remaining > 0) {
+            final int location = length - remaining;
+            final int count = input.read(buffer, offset + location, remaining);
+            if (count == -1) { // EOF
+                break;
+            }
+            remaining -= count;
+        }
+        return length - remaining;
+    }
+
+    /**
+     * Skips bytes from an input byte stream.
+     * This implementation guarantees that it will read as many bytes
+     * as possible before giving up; this may not always be the case for
+     * skip() implementations in subclasses of {@link InputStream}.
+     * <p>
+     * Note that the implementation uses {@link InputStream#read(byte[], int, int)} rather
+     * than delegating to {@link InputStream#skip(long)}.
+     * This means that the method may be considerably less efficient than using the actual skip implementation,
+     * this is done to guarantee that the correct number of bytes are skipped.
+     * </p>
+     *
+     * @param input byte stream to skip
+     * @param toSkip number of bytes to skip.
+     * @return number of bytes actually skipped.
+     * @throws IOException              if there is a problem reading the file
+     * @throws IllegalArgumentException if toSkip is negative
+     * @see InputStream#skip(long)
+     * @see <a href="https://issues.apache.org/jira/browse/IO-203">IO-203 - Add skipFully() method for InputStreams</a>
+     */
+    public static long skip(final InputStream input, final long toSkip) throws IOException {
+        if (toSkip < 0) {
+            throw new IllegalArgumentException("Skip count must be non-negative, actual: " + toSkip);
+        }
+        /*
+         * N.B. no need to synchronize this because: - we don't care if the buffer is created multiple times (the data
+         * is ignored) - we always use the same size buffer, so if it it is recreated it will still be OK (if the buffer
+         * size were variable, we would need to synch. to ensure some other thread did not create a smaller one)
+         */
+        if (SKIP_BYTE_BUFFER == null) {
+            SKIP_BYTE_BUFFER = new byte[SKIP_BUFFER_SIZE];
+        }
+        long remain = toSkip;
+        while (remain > 0) {
+            // See https://issues.apache.org/jira/browse/IO-203 for why we use read() rather than delegating to skip()
+            final long n = input.read(SKIP_BYTE_BUFFER, 0, (int) Math.min(remain, SKIP_BUFFER_SIZE));
+            if (n < 0) { // EOF
+                break;
+            }
+            remain -= n;
+        }
+        return toSkip - remain;
+    }
+
+    public static long skip(final InputStream input, final long toSkip, byte[] buffer) throws IOException {
+        if (toSkip < 0) {
+            throw new IllegalArgumentException("Skip count must be non-negative, actual: " + toSkip);
+        }
+        /*
+         * N.B. no need to synchronize this because: - we don't care if the buffer is created multiple times (the data
+         * is ignored) - we always use the same size buffer, so if it it is recreated it will still be OK (if the buffer
+         * size were variable, we would need to synch. to ensure some other thread did not create a smaller one)
+         */
+        long remain = toSkip;
+        while (remain > 0) {
+            // See https://issues.apache.org/jira/browse/IO-203 for why we use read() rather than delegating to skip()
+            final long n = input.read(buffer, 0, (int) Math.min(remain, buffer.length));
+            if (n < 0) { // EOF
+                break;
+            }
+            remain -= n;
+        }
+        return toSkip - remain;
+    }
 }

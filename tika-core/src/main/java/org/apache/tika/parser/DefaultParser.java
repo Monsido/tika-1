@@ -16,14 +16,18 @@
  */
 package org.apache.tika.parser;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.tika.config.ServiceLoader;
+import org.apache.tika.detect.DefaultEncodingDetector;
+import org.apache.tika.detect.EncodingDetector;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.mime.MediaTypeRegistry;
+import org.apache.tika.utils.ServiceLoaderUtils;
 
 /**
  * A composite parser based on all the {@link Parser} implementations
@@ -46,32 +50,54 @@ public class DefaultParser extends CompositeParser {
      * @param loader service loader
      * @return ordered list of statically loadable parsers
      */
-    private static List<Parser> getDefaultParsers(ServiceLoader loader) {
-        List<Parser> parsers =
-                loader.loadStaticServiceProviders(Parser.class);
-        Collections.sort(parsers, new Comparator<Parser>() {
-            public int compare(Parser p1, Parser p2) {
-                String n1 = p1.getClass().getName();
-                String n2 = p2.getClass().getName();
-                boolean t1 = n1.startsWith("org.apache.tika.");
-                boolean t2 = n2.startsWith("org.apache.tika.");
-                if (t1 == t2) {
-                    return n1.compareTo(n2);
-                } else if (t1) {
-                    return -1;
-                } else {
-                    return 1;
-                }
+    private static List<Parser> getDefaultParsers(ServiceLoader loader,
+                                                  EncodingDetector encodingDetector) {
+        List<Parser> parsers = loader.loadStaticServiceProviders(Parser.class);
+
+        if (encodingDetector != null) {
+            for (Parser p : parsers) {
+                setEncodingDetector(p, encodingDetector);
             }
-        });
+        }
+        ServiceLoaderUtils.sortLoadedClasses(parsers);
         return parsers;
+    }
+
+    //recursively go through the parsers and set the encoding detector
+    //as configured in the config file
+    private static void setEncodingDetector(Parser p, EncodingDetector encodingDetector) {
+        if (p instanceof AbstractEncodingDetectorParser) {
+            ((AbstractEncodingDetectorParser)p).setEncodingDetector(encodingDetector);
+        } else if (p instanceof CompositeParser) {
+            for (Parser child : ((CompositeParser)p).getAllComponentParsers()) {
+                setEncodingDetector(child, encodingDetector);
+            }
+        } else if (p instanceof ParserDecorator) {
+            setEncodingDetector(((ParserDecorator)p).getWrappedParser(), encodingDetector);
+        }
     }
 
     private transient final ServiceLoader loader;
 
-    public DefaultParser(MediaTypeRegistry registry, ServiceLoader loader) {
-        super(registry, getDefaultParsers(loader));
+    public DefaultParser(MediaTypeRegistry registry, ServiceLoader loader,
+                         Collection<Class<? extends Parser>> excludeParsers,
+                         EncodingDetector encodingDetector) {
+        super(registry, getDefaultParsers(loader, encodingDetector), excludeParsers);
         this.loader = loader;
+    }
+
+    public DefaultParser(MediaTypeRegistry registry, ServiceLoader loader,
+                         Collection<Class<? extends Parser>> excludeParsers) {
+        super(registry, getDefaultParsers(loader, new DefaultEncodingDetector(loader)), excludeParsers);
+        this.loader = loader;
+    }
+
+    public DefaultParser(MediaTypeRegistry registry, ServiceLoader loader, EncodingDetector encodingDetector) {
+        this(registry, loader, null, encodingDetector);
+    }
+
+    public DefaultParser(MediaTypeRegistry registry, ServiceLoader loader) {
+        this(registry, loader, null, new DefaultEncodingDetector(loader));
     }
 
     public DefaultParser(MediaTypeRegistry registry, ClassLoader loader) {
@@ -97,8 +123,10 @@ public class DefaultParser extends CompositeParser {
         if (loader != null) {
             // Add dynamic parser service (they always override static ones)
             MediaTypeRegistry registry = getMediaTypeRegistry();
-            for (Parser parser
-                    : loader.loadDynamicServiceProviders(Parser.class)) {
+            List<Parser> parsers =
+                    loader.loadDynamicServiceProviders(Parser.class);
+            Collections.reverse(parsers); // best parser last
+            for (Parser parser : parsers) {
                 for (MediaType type : parser.getSupportedTypes(context)) {
                     map.put(registry.normalize(type), parser);
                 }
@@ -108,4 +136,13 @@ public class DefaultParser extends CompositeParser {
         return map;
     }
 
+    @Override
+    public List<Parser> getAllComponentParsers() {
+        List<Parser> parsers = super.getAllComponentParsers();
+        if (loader != null) {
+            parsers = new ArrayList<Parser>(parsers);
+            parsers.addAll(loader.loadDynamicServiceProviders(Parser.class));
+        }
+        return parsers;
+    }
 }

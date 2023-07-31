@@ -29,7 +29,6 @@ import org.apache.tika.parser.chm.core.ChmCommons;
  * two kinds of file represented in the directory: user data and format related
  * files. The files which are format-related have names which begin with '::',
  * the user data files have names which begin with "/".
- * 
  */
 public class DirectoryListingEntry {
     /* Length of the entry name */
@@ -81,7 +80,7 @@ public class DirectoryListingEntry {
         sb.append("length:=" + getLength());
         return sb.toString();
     }
-
+    
     /**
      * Returns an entry name length
      * 
@@ -147,8 +146,5 @@ public class DirectoryListingEntry {
 
     protected void setLength(int length) {
         this.length = length;
-    }
-
-    public static void main(String[] args) {
     }
 }

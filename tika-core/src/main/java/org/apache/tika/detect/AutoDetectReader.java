@@ -22,8 +22,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.util.Collections;
 import java.util.List;
 
+import org.apache.tika.config.LoadErrorHandler;
 import org.apache.tika.config.ServiceLoader;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
@@ -42,15 +45,27 @@ public class AutoDetectReader extends BufferedReader {
     private static final ServiceLoader DEFAULT_LOADER =
             new ServiceLoader(AutoDetectReader.class.getClassLoader());
 
+    private static EncodingDetector DEFAULT_DETECTOR;
+
+    static {
+        DEFAULT_DETECTOR = new CompositeEncodingDetector(
+                DEFAULT_LOADER.loadServiceProviders(EncodingDetector.class));
+    }
+
     private static Charset detect(
             InputStream input, Metadata metadata,
-            List<EncodingDetector> detectors)
+            List<EncodingDetector> detectors, LoadErrorHandler handler)
             throws IOException, TikaException {
         // Ask all given detectors for the character encoding
         for (EncodingDetector detector : detectors) {
-            Charset charset = detector.detect(input, metadata);
-            if (charset != null) {
-                return charset;
+            try {
+                Charset charset = detector.detect(input, metadata);
+                if (charset != null) {
+                    return charset;
+                }
+            } catch (NoClassDefFoundError e) {
+                // TIKA-1041: Detector dependencies not present.
+                handler.handleLoadError(detector.getClass().getName(), e);
             }
         }
 
@@ -61,7 +76,7 @@ public class AutoDetectReader extends BufferedReader {
             if (charset != null) {
                 try {
                     return CharsetUtils.forName(charset);
-                } catch (Exception e) {
+                } catch (IllegalArgumentException e) {
                     // ignore
                 }
             }
@@ -85,29 +100,53 @@ public class AutoDetectReader extends BufferedReader {
         }
     }
 
+    /**
+     *
+     * @param stream stream from which to read -- make sure that it supports mark!
+     * @param metadata
+     * @param detectors
+     * @param handler
+     * @throws IOException
+     * @throws TikaException
+     */
     private AutoDetectReader(
-            BufferedInputStream stream, Metadata metadata,
-            List<EncodingDetector> detectors)
+            InputStream stream, Metadata metadata,
+            List<EncodingDetector> detectors, LoadErrorHandler handler)
             throws IOException, TikaException {
-        this(stream, detect(stream, metadata, detectors));
+        this(stream, detect(stream, metadata, detectors, handler));
+    }
+
+    public AutoDetectReader(
+            InputStream stream, Metadata metadata,
+            EncodingDetector encodingDetector) throws IOException, TikaException {
+        this(getBuffered(stream), metadata, Collections.singletonList(encodingDetector),
+                DEFAULT_LOADER.getLoadErrorHandler());
     }
 
     public AutoDetectReader(
             InputStream stream, Metadata metadata,
             ServiceLoader loader) throws IOException, TikaException {
-        this(new BufferedInputStream(stream), metadata,
-                loader.loadServiceProviders(EncodingDetector.class));
+        this(getBuffered(stream), metadata,
+                loader.loadServiceProviders(EncodingDetector.class),
+                loader.getLoadErrorHandler());
     }
 
     public AutoDetectReader(InputStream stream, Metadata metadata)
             throws IOException, TikaException {
-        this(new BufferedInputStream(stream), metadata, DEFAULT_LOADER);
+        this(stream, metadata, DEFAULT_DETECTOR);
     }
 
     public AutoDetectReader(InputStream stream)
             throws IOException, TikaException {
         this(stream, new Metadata());
     }
+    private static InputStream getBuffered(InputStream stream) {
+        if (stream.markSupported()) {
+            return stream;
+        }
+        return new BufferedInputStream(stream);
+    }
+
 
     public Charset getCharset() {
         return charset;

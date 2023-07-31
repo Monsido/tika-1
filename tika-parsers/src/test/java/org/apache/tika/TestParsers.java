@@ -16,7 +16,11 @@
  */
 package org.apache.tika;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import java.io.File;
+import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.InputStream;
 
@@ -25,36 +29,38 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Test;
 import org.xml.sax.helpers.DefaultHandler;
 
 /**
  * Junit test class for Tika {@link Parser}s.
  */
-public class TestParsers extends TikaTest {
+public class TestParsers extends MultiThreadedTikaTest {
 
     private TikaConfig tc;
 
     private Tika tika;
 
+    @Before
     public void setUp() throws Exception {
         tc = TikaConfig.getDefaultConfig();
         tika = new Tika(tc);
     }
 
+    @Test
     public void testWORDxtraction() throws Exception {
         File file = getResourceAsFile("/test-documents/testWORD.doc");
         Parser parser = tika.getParser();
         Metadata metadata = new Metadata();
-        InputStream stream = new FileInputStream(file);
-        try {
-            parser.parse(
-                    stream, new DefaultHandler(), metadata, new ParseContext());
-        } finally {
-            stream.close();
+        try (InputStream stream = new FileInputStream(file)) {
+            parser.parse(stream, new DefaultHandler(), metadata, new ParseContext());
         }
         assertEquals("Sample Word Document", metadata.get(TikaCoreProperties.TITLE));
     }
 
+    @Test
     public void testEXCELExtraction() throws Exception {
         final String expected = "Numbers and their Squares";
         File file = getResourceAsFile("/test-documents/testEXCEL.xls");
@@ -63,28 +69,25 @@ public class TestParsers extends TikaTest {
                 .contains(expected));
         Parser parser = tika.getParser();
         Metadata metadata = new Metadata();
-        InputStream stream = new FileInputStream(file);
-        try {
-            parser.parse(
-                    stream, new DefaultHandler(), metadata, new ParseContext());
-        } finally {
-            stream.close();
+        try (InputStream stream = new FileInputStream(file)) {
+            parser.parse(stream, new DefaultHandler(), metadata, new ParseContext());
         }
         assertEquals("Simple Excel document", metadata.get(TikaCoreProperties.TITLE));
     }
 
+    @Test
     public void testOptionalHyphen() throws Exception {
         String[] extensions =
-                new String[] { "ppt", "pptx", "doc", "docx", "rtf", "pdf"};
+                new String[]{"ppt", "pptx", "doc", "docx", "rtf", "pdf"};
         for (String extension : extensions) {
             File file = getResourceAsFile("/test-documents/testOptionalHyphen." + extension);
             String content = tika.parseToString(file);
             assertTrue("optional hyphen was not handled for '" + extension + "' file type: " + content,
-                       content.contains("optionalhyphen") ||
-                       content.contains("optional\u00adhyphen") ||   // soft hyphen
-                       content.contains("optional\u200bhyphen") ||   // zero width space
-                       content.contains("optional\u2027"));          // hyphenation point
-            
+                    content.contains("optionalhyphen") ||
+                            content.contains("optional\u00adhyphen") ||   // soft hyphen
+                            content.contains("optional\u200bhyphen") ||   // zero width space
+                            content.contains("optional\u2027"));          // hyphenation point
+
         }
     }
 
@@ -92,15 +95,34 @@ public class TestParsers extends TikaTest {
         File file = getResourceAsFile("/test-documents/" + fileName + "." + extension);
         String content = tika.parseToString(file);
         assertTrue(extension + ": content=" + content + " did not extract text",
-                   content.contains("Here is some text"));
+                content.contains("Here is some text"));
         assertTrue(extension + ": content=" + content + " did not extract comment",
-                   content.contains("Here is a comment"));
+                content.contains("Here is a comment"));
     }
 
+    @Test
     public void testComment() throws Exception {
-        final String[] extensions = new String[] {"ppt", "pptx", "doc", "docx", "pdf", "rtf"};
-        for(String extension : extensions) {
+        final String[] extensions = new String[]{"ppt", "pptx", "doc",
+                "docx", "xls", "xlsx", "pdf", "rtf"};
+        for (String extension : extensions) {
             verifyComment(extension, "testComment");
         }
+    }
+
+    //TODO: add a @smoketest tag or something similar to run this occasionally automatically
+    @Test
+    @Ignore("ignore for regular builds; run occasionally")
+    public void testAllMultiThreaded() throws Exception {
+        //this runs against all files in /test-documents
+        ParseContext[] contexts = new ParseContext[10];
+        for (int i = 0; i < 10; i++) {
+             contexts[i] = new ParseContext();
+        }
+        testMultiThreaded(AUTO_DETECT_PARSER, contexts, 10, 100, new FileFilter() {
+            @Override
+            public boolean accept(File pathname) {
+                return true;
+            }
+        });
     }
 }

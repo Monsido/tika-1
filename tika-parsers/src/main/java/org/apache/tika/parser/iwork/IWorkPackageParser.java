@@ -16,6 +16,24 @@
  */
 package org.apache.tika.parser.iwork;
 
+import org.apache.commons.compress.archivers.zip.UnsupportedZipFeatureException;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
+import org.apache.commons.compress.archivers.zip.ZipFile;
+import org.apache.commons.io.input.CloseShieldInputStream;
+import org.apache.tika.detect.XmlRootExtractor;
+import org.apache.tika.exception.TikaException;
+import org.apache.tika.metadata.Metadata;
+import org.apache.tika.mime.MediaType;
+import org.apache.tika.parser.AbstractParser;
+import org.apache.tika.parser.ParseContext;
+import org.apache.tika.sax.OfflineContentHandler;
+import org.apache.tika.sax.XHTMLContentHandler;
+import org.apache.tika.utils.XMLReaderUtils;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.SAXException;
+
+import javax.xml.namespace.QName;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,24 +41,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-
-import javax.xml.namespace.QName;
-
-import org.apache.commons.compress.archivers.zip.UnsupportedZipFeatureException;
-import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
-import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream;
-import org.apache.commons.compress.archivers.zip.ZipFile;
-import org.apache.tika.detect.XmlRootExtractor;
-import org.apache.tika.exception.TikaException;
-import org.apache.tika.io.CloseShieldInputStream;
-import org.apache.tika.metadata.Metadata;
-import org.apache.tika.mime.MediaType;
-import org.apache.tika.parser.AbstractParser;
-import org.apache.tika.parser.ParseContext;
-import org.apache.tika.sax.OfflineContentHandler;
-import org.apache.tika.sax.XHTMLContentHandler;
-import org.xml.sax.ContentHandler;
-import org.xml.sax.SAXException;
 
 /**
  * A parser for the IWork container files. This includes *.key, *.pages and *.numbers files.
@@ -103,12 +103,9 @@ public class IWorkPackageParser extends AbstractParser {
                  return null;
              }
 
-             InputStream stream = zip.getInputStream(entry);
-             try {
-                return detectType(stream);
-             } finally {
-                 stream.close();
-             }
+              try (InputStream stream = zip.getInputStream(entry)) {
+                  return detectType(stream);
+              }
           } catch (IOException e) {
              return null;
           }
@@ -122,7 +119,7 @@ public class IWorkPackageParser extends AbstractParser {
           return detectType(zip);
        }
        
-       private static IWORKDocumentType detectType(InputStream stream) {
+       public static IWORKDocumentType detectType(InputStream stream) {
           QName qname = new XmlRootExtractor().extractRootElement(stream);
           if (qname != null) {
              String uri = qname.getNamespaceURI();
@@ -205,18 +202,19 @@ public class IWorkPackageParser extends AbstractParser {
 
                metadata.add(Metadata.CONTENT_TYPE, type.getType().toString());
                xhtml.startDocument();
-               if (contentHandler != null) {
-                  context.getSAXParser().parse(
-                          new CloseShieldInputStream(entryStream),
-                          new OfflineContentHandler(contentHandler)
-                  );
-               }
+                if (contentHandler != null) {
+                    XMLReaderUtils.parseSAX(
+                            new CloseShieldInputStream(entryStream),
+                            new OfflineContentHandler(contentHandler),
+                            context
+                    );
+                }
                xhtml.endDocument();
             }
             
             entry = zip.getNextZipEntry();
         }
-        zip.close();
+        // Don't close the zip InputStream (TIKA-1117).
     }
 
 }

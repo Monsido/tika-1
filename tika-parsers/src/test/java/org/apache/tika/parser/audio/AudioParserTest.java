@@ -16,20 +16,22 @@
  */
 package org.apache.tika.parser.audio;
 
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
 
 import org.apache.tika.Tika;
 import org.apache.tika.metadata.Metadata;
+import org.junit.Test;
 
-public class AudioParserTest extends TestCase {
+public class AudioParserTest {
 
+    @Test
     public void testWAV() throws Exception {
         String path = "/test-documents/testWAV.wav";
         Metadata metadata = new Metadata();
         String content = new Tika().parseToString(
                 AudioParserTest.class.getResourceAsStream(path), metadata);
 
-        assertEquals("audio/x-wav", metadata.get(Metadata.CONTENT_TYPE));
+        assertEquals("audio/vnd.wave", metadata.get(Metadata.CONTENT_TYPE));
         assertEquals("44100.0", metadata.get("samplerate"));
         assertEquals("2", metadata.get("channels"));
         assertEquals("16", metadata.get("bits"));
@@ -38,6 +40,7 @@ public class AudioParserTest extends TestCase {
         assertEquals("", content);
     }
 
+    @Test
     public void testAIFF() throws Exception {
         String path = "/test-documents/testAIFF.aif";
         Metadata metadata = new Metadata();
@@ -53,6 +56,7 @@ public class AudioParserTest extends TestCase {
         assertEquals("", content);
     }
 
+    @Test
     public void testAU() throws Exception {
         String path = "/test-documents/testAU.au";
         Metadata metadata = new Metadata();

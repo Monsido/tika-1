@@ -27,6 +27,10 @@ public interface MimeTypesReaderMetKeys {
 
     String MIME_TYPE_TYPE_ATTR = "type";
 
+    String INTERPRETED_ATTR = "interpreted";
+
+    String ACRONYM_TAG = "acronym";
+
     String COMMENT_TAG = "_comment";
 
     String GLOB_TAG = "glob";
@@ -59,8 +63,13 @@ public interface MimeTypesReaderMetKeys {
 
     String MATCH_MASK_ATTR = "mask";
 
+    String MATCH_MINSHOULDMATCH_ATTR = "minShouldMatch";
+
     String NS_URI_ATTR = "namespaceURI";
 
     String LOCAL_NAME_ATTR = "localName";
 
+    String TIKA_LINK_TAG = "tika:link";
+    
+    String TIKA_UTI_TAG = "tika:uti";
 }

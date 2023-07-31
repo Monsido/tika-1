@@ -16,22 +16,27 @@
  */
 package org.apache.tika.metadata;
 
+import static org.apache.tika.utils.DateUtils.formatDate;
+
 import java.io.Serializable;
 import java.text.DateFormat;
 import java.text.DateFormatSymbols;
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.Enumeration;
-import java.util.GregorianCalendar;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.TimeZone;
 
 import org.apache.tika.metadata.Property.PropertyType;
+import org.apache.tika.utils.DateUtils;
 
 /**
  * A multi-valued metadata container.
@@ -53,63 +58,44 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
      */
     public static final String NAMESPACE_PREFIX_DELIMITER = ":";
 
-    // These properties are being moved to a new Tika core properties definition, javadocs will be added once it's available
-    @Deprecated public static final String FORMAT = "format";
-    @Deprecated public static final String IDENTIFIER = "identifier";
-    @Deprecated public static final String MODIFIED = "modified";
-    @Deprecated public static final String CONTRIBUTOR = "contributor";
-    @Deprecated public static final String COVERAGE = "coverage";
-    @Deprecated public static final String CREATOR = "creator";
-    @Deprecated public static final Property DATE = Property.internalDate("date");
-    @Deprecated public static final String DESCRIPTION = "description";
-    @Deprecated public static final String LANGUAGE = "language";
-    @Deprecated public static final String PUBLISHER = "publisher";
-    @Deprecated public static final String RELATION = "relation";
-    @Deprecated public static final String RIGHTS = "rights";
-    @Deprecated public static final String SOURCE = "source";
-    @Deprecated public static final String SUBJECT = "subject";
-    @Deprecated public static final String TITLE = "title";
-    @Deprecated public static final String TYPE = "type";
-
-    /**
-     * The UTC time zone. Not sure if {@link TimeZone#getTimeZone(String)}
-     * understands "UTC" in all environments, but it'll fall back to GMT
-     * in such cases, which is in practice equivalent to UTC.
-     */
-    private static final TimeZone UTC = TimeZone.getTimeZone("UTC");
-
-    /**
-     * Custom time zone used to interpret date values without a time
-     * component in a way that most likely falls within the same day
-     * regardless of in which time zone it is later interpreted. For
-     * example, the "2012-02-17" date would map to "2012-02-17T12:00:00Z"
-     * (instead of the default "2012-02-17T00:00:00Z"), which would still
-     * map to "2012-02-17" if interpreted in say Pacific time (while the
-     * default mapping would result in "2012-02-16" for UTC-8).
-     */
-    private static final TimeZone MIDDAY = TimeZone.getTimeZone("GMT-12:00");
+    /** @deprecated use TikaCoreProperties#FORMAT */
+    public static final String FORMAT = "format";
+    /** @deprecated use TikaCoreProperties#IDENTIFIER */
+    public static final String IDENTIFIER = "identifier";
+    /** @deprecated use TikaCoreProperties#MODIFIED */
+    public static final String MODIFIED = "modified";
+    /** @deprecated use TikaCoreProperties#CONTRIBUTOR */
+    public static final String CONTRIBUTOR = "contributor";
+    /** @deprecated use TikaCoreProperties#COVERAGE */
+    public static final String COVERAGE = "coverage";
+    /** @deprecated use TikaCoreProperties#CREATOR */
+    public static final String CREATOR = "creator";
+    /** @deprecated use TikaCoreProperties#CREATED */
+    public static final Property DATE = Property.internalDate("date");
+    /** @deprecated use TikaCoreProperties#DESCRIPTION */
+    public static final String DESCRIPTION = "description";
+    /** @deprecated use TikaCoreProperties#LANGUAGE */
+    public static final String LANGUAGE = "language";
+    /** @deprecated use TikaCoreProperties#PUBLISHER */
+    public static final String PUBLISHER = "publisher";
+    /** @deprecated use TikaCoreProperties#RELATION */
+    public static final String RELATION = "relation";
+    /** @deprecated use TikaCoreProperties#RIGHTS */
+    public static final String RIGHTS = "rights";
+    /** @deprecated use TikaCoreProperties#SOURCE */
+    public static final String SOURCE = "source";
+    /** @deprecated use TikaCoreProperties#KEYWORDS */
+    public static final String SUBJECT = "subject";
+    /** @deprecated use TikaCoreProperties#TITLE */
+    public static final String TITLE = "title";
+    /** @deprecated use TikaCoreProperties#TYPE */
+    public static final String TYPE = "type";
 
     /**
      * Some parsers will have the date as a ISO-8601 string
      *  already, and will set that into the Metadata object.
-     * So we can return Date objects for these, this is the
-     *  list (in preference order) of the various ISO-8601
-     *  variants that we try when processing a date based
-     *  property.
      */
-    private static final DateFormat[] iso8601InputFormats = new DateFormat[] {
-        // yyyy-mm-ddThh...
-        createDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", UTC),   // UTC/Zulu
-        createDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", null),    // With timezone
-        createDateFormat("yyyy-MM-dd'T'HH:mm:ss", null),     // Without timezone
-        // yyyy-mm-dd hh...
-        createDateFormat("yyyy-MM-dd' 'HH:mm:ss'Z'", UTC),   // UTC/Zulu
-        createDateFormat("yyyy-MM-dd' 'HH:mm:ssZ", null),    // With timezone
-        createDateFormat("yyyy-MM-dd' 'HH:mm:ss", null),     // Without timezone
-        // Date without time, set to Midday UTC
-        createDateFormat("yyyy-MM-dd", MIDDAY),              // Normal date format
-        createDateFormat("yyyy:MM:dd", MIDDAY),              // Image (IPTC/EXIF) format
-    };
+    private static final DateUtils DATE_UTILS = new DateUtils();
 
     private static DateFormat createDateFormat(String format, TimeZone timezone) {
         SimpleDateFormat sdf =
@@ -129,43 +115,7 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
      * @return parsed date, or <code>null</code> if the date can't be parsed
      */
     private static synchronized Date parseDate(String date) {
-        // Java doesn't like timezones in the form ss+hh:mm
-        // It only likes the hhmm form, without the colon
-        int n = date.length();
-        if (date.charAt(n - 3) == ':'
-            && (date.charAt(n - 6) == '+' || date.charAt(n - 6) == '-')) {
-            date = date.substring(0, n - 3) + date.substring(n - 2);
-        }
-
-        // Try several different ISO-8601 variants
-        for (DateFormat format : iso8601InputFormats) {
-            try {
-                return format.parse(date);
-            } catch (ParseException ignore) {
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Returns a ISO 8601 representation of the given date. This method 
-     * is thread safe and non-blocking.
-     *
-     * @see <a href="https://issues.apache.org/jira/browse/TIKA-495">TIKA-495</a>
-     * @param date given date
-     * @return ISO 8601 date string
-     */
-    private static String formatDate(Date date) {
-        Calendar calendar = GregorianCalendar.getInstance(UTC, Locale.US);
-        calendar.setTime(date);
-        return String.format(
-                "%04d-%02d-%02dT%02d:%02d:%02dZ",
-                calendar.get(Calendar.YEAR),
-                calendar.get(Calendar.MONTH) + 1,
-                calendar.get(Calendar.DAY_OF_MONTH),
-                calendar.get(Calendar.HOUR_OF_DAY),
-                calendar.get(Calendar.MINUTE),
-                calendar.get(Calendar.SECOND));
+        return DATE_UTILS.tryToParse(date);
     }
 
     /**
@@ -355,7 +305,8 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
              if (property.isMultiValuePermitted()) {
                  set(property, appendedValues(values, value));
              } else {
-                 throw new PropertyTypeException(property.getPropertyType());
+                 throw new PropertyTypeException(property.getName() +
+                         " : " + property.getPropertyType());
              }
         }
     }
@@ -378,16 +329,19 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
 
     /**
      * Set metadata name/value. Associate the specified value to the specified
-     * metadata name. If some previous values were associated to this name, they
-     * are removed.
-     * 
-     * @param name
-     *          the metadata name.
-     * @param value
-     *          the metadata value.
+     * metadata name. If some previous values were associated to this name,
+     * they are removed. If the given value is <code>null</code>, then the
+     * metadata entry is removed.
+     *
+     * @param name the metadata name.
+     * @param value  the metadata value, or <code>null</code>
      */
     public void set(String name, String value) {
-        metadata.put(name, new String[] { value });
+        if (value != null) {
+            metadata.put(name, new String[] { value });
+        } else {
+            metadata.remove(name);
+        }
     }
 
     /**
@@ -454,6 +408,45 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
     }
 
     /**
+     * Adds the integer value of the identified metadata property.
+     *
+     * @since Apache Tika 1.21
+     * @param property seq integer property definition
+     * @param value    property value
+     */
+    public void add(Property property, int value) {
+        if(property.getPrimaryProperty().getPropertyType() != PropertyType.SEQ) {
+            throw new PropertyTypeException(PropertyType.SEQ, property.getPrimaryProperty().getPropertyType());
+        }
+        if(property.getPrimaryProperty().getValueType() != Property.ValueType.INTEGER) {
+            throw new PropertyTypeException(Property.ValueType.INTEGER, property.getPrimaryProperty().getValueType());
+        }
+        add(property, Integer.toString(value));
+    }
+
+    /**
+     * Gets the array of ints of the identified "seq" integer metadata property.
+     *
+     * @since Apache Tika 1.21
+     * @param property seq integer property definition
+     * @return array of ints
+     */
+    public int[] getIntValues(Property property) {
+        if(property.getPrimaryProperty().getPropertyType() != PropertyType.SEQ) {
+            throw new PropertyTypeException(PropertyType.SEQ, property.getPrimaryProperty().getPropertyType());
+        }
+        if(property.getPrimaryProperty().getValueType() != Property.ValueType.INTEGER) {
+            throw new PropertyTypeException(Property.ValueType.INTEGER, property.getPrimaryProperty().getValueType());
+        }
+        String[] vals = getValues(property);
+        int[] ret = new int[vals.length];
+        for (int i = 0; i < vals.length; i++) {
+            ret[i] = Integer.parseInt(vals[i]);
+        }
+        return ret;
+    }
+
+    /**
      * Sets the real or rational value of the identified metadata property.
      *
      * @since Apache Tika 0.8
@@ -485,7 +478,32 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
         if(property.getPrimaryProperty().getValueType() != Property.ValueType.DATE) {
             throw new PropertyTypeException(Property.ValueType.DATE, property.getPrimaryProperty().getValueType());
         }
-        set(property, formatDate(date));
+        String dateString = null;
+        if (date != null) {
+            dateString = formatDate(date);
+        }
+        set(property, dateString);
+    }
+
+    /**
+     * Sets the date value of the identified metadata property.
+     *
+     * @since Apache Tika 0.8
+     * @param property simple integer property definition
+     * @param date     property value
+     */
+    public void set(Property property, Calendar date) {
+        if(property.getPrimaryProperty().getPropertyType() != Property.PropertyType.SIMPLE) {
+            throw new PropertyTypeException(Property.PropertyType.SIMPLE, property.getPrimaryProperty().getPropertyType());
+        }
+        if(property.getPrimaryProperty().getValueType() != Property.ValueType.DATE) {
+            throw new PropertyTypeException(Property.ValueType.DATE, property.getPrimaryProperty().getValueType());
+        }
+        String dateString = null;
+        if (date != null) {
+            dateString = formatDate(date);
+        }
+        set(property, dateString);
     }
 
     /**
@@ -507,7 +525,20 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
         return metadata.size();
     }
 
-    public boolean equals(Object o) {
+    public int hashCode() {
+        int h = 0;
+        for (Iterator<Entry<String,String[]>> i = metadata.entrySet().iterator();
+             i.hasNext();) {
+            h += getMetadataEntryHashCode(i.next());
+        }
+        return h;
+    }
+
+    private int getMetadataEntryHashCode(Entry<String, String[]> e) {
+    	return Objects.hashCode(e.getKey()) ^ Arrays.hashCode(e.getValue());
+	}
+
+	public boolean equals(Object o) {
 
         if (o == null) {
             return false;
@@ -546,7 +577,10 @@ public class Metadata implements CreativeCommons, Geographic, HttpHeaders,
         for (int i = 0; i < names.length; i++) {
             String[] values = _getValues(names[i]);
             for (int j = 0; j < values.length; j++) {
-                buf.append(names[i]).append("=").append(values[j]).append(" ");
+            	if (buf.length() > 0) {
+            		buf.append(" ");
+            	}
+                buf.append(names[i]).append("=").append(values[j]);
             }
         }
         return buf.toString();

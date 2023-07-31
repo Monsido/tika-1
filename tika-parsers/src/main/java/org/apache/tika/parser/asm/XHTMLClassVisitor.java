@@ -19,7 +19,9 @@ package org.apache.tika.parser.asm;
 import java.io.IOException;
 import java.io.InputStream;
 
+import org.apache.tika.exception.RuntimeSAXException;
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.exception.WriteLimitReachedException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.apache.tika.sax.XHTMLContentHandler;
@@ -38,7 +40,7 @@ import org.xml.sax.SAXException;
  * Class visitor that generates XHTML SAX events to describe the
  * contents of the visited class.
  */
-class XHTMLClassVisitor implements ClassVisitor {
+class XHTMLClassVisitor extends ClassVisitor {
 
     private final XHTMLContentHandler xhtml;
 
@@ -49,6 +51,7 @@ class XHTMLClassVisitor implements ClassVisitor {
     private String packageName;
 
     public XHTMLClassVisitor(ContentHandler handler, Metadata metadata) {
+        super(Opcodes.ASM7);
         this.xhtml = new XHTMLContentHandler(handler, metadata);
         this.metadata = metadata;
     }
@@ -59,11 +62,8 @@ class XHTMLClassVisitor implements ClassVisitor {
             ClassReader reader = new ClassReader(stream);
             reader.accept(this, ClassReader.SKIP_FRAMES | ClassReader.SKIP_CODE);
         } catch (RuntimeException e) {
-            if (e.getCause() instanceof SAXException) {
-                throw (SAXException) e.getCause();
-            } else {
-                throw new TikaException("Failed to parse a Java class", e);
-            }
+            WriteLimitReachedException.throwIfWriteLimitReached(e);
+            throw new TikaException("Failed to parse a Java class", e);
         }
     }
 
@@ -121,7 +121,7 @@ class XHTMLClassVisitor implements ClassVisitor {
             }
             xhtml.characters("{\n");
         } catch (SAXException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeSAXException(e);
         }
     }
 
@@ -145,7 +145,7 @@ class XHTMLClassVisitor implements ClassVisitor {
             xhtml.endElement("pre");
             xhtml.endDocument();
         } catch (SAXException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeSAXException(e);
         }
     }
 
@@ -204,7 +204,7 @@ class XHTMLClassVisitor implements ClassVisitor {
                 writeSemicolon();
                 writeNewline();
             } catch (SAXException e) {
-                throw new RuntimeException(e);
+                throw new RuntimeSAXException(e);
             }
         }
 
@@ -252,7 +252,7 @@ class XHTMLClassVisitor implements ClassVisitor {
                 writeSemicolon();
                 writeNewline();
             } catch (SAXException e) {
-                throw new RuntimeException(e);
+                throw new RuntimeSAXException(e);
             }
         }
 

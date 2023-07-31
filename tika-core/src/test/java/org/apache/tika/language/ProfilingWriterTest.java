@@ -16,12 +16,16 @@
  */
 package org.apache.tika.language;
 
+import static org.junit.Assert.assertEquals;
+
 import java.io.IOException;
 
-import junit.framework.TestCase;
+import org.junit.Test;
 
-public class ProfilingWriterTest extends TestCase {
+@Deprecated
+public class ProfilingWriterTest {
 
+    @Test
     public void testProfilingWriter() throws IOException {
         ProfilingWriter writer = new ProfilingWriter();
         writer.write(" foo+BAR FooBar\n");

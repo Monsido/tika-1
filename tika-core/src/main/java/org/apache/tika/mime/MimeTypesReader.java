@@ -16,23 +16,30 @@
  */
 package org.apache.tika.mime;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedList;
-import java.util.List;
-
+import javax.xml.XMLConstants;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParser;
 import javax.xml.parsers.SAXParserFactory;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerException;
-import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.sax.SAXResult;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
+import org.apache.tika.exception.TikaException;
+import org.apache.tika.utils.XMLReaderUtils;
 import org.w3c.dom.Document;
 import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
@@ -89,43 +96,69 @@ import org.xml.sax.helpers.DefaultHandler;
  *         type CDATA #REQUIRED&gt;
  *  ]&gt;
  * </pre>
+ * 
+ * In addition to the standard fields, this will also read two Tika specific fields:
+ *  - link
+ *  - uti
+ * 
  *
- * @see http://freedesktop.org/wiki/Standards_2fshared_2dmime_2dinfo_2dspec
+ * @see <a href="http://freedesktop.org/wiki/Standards_2fshared_2dmime_2dinfo_2dspec">http://freedesktop.org/wiki/Standards_2fshared_2dmime_2dinfo_2dspec</a>
  */
-class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
+public class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
+    /**
+     * Parser pool size
+     */
+    private static int POOL_SIZE = 10;
 
-    private final MimeTypes types;
+    private static final ReentrantReadWriteLock READ_WRITE_LOCK = new ReentrantReadWriteLock();
 
-    /** Current type */
-    private MimeType type = null;
+    private static ArrayBlockingQueue<SAXParser> SAX_PARSERS = new ArrayBlockingQueue<>(POOL_SIZE);
 
-    private int priority;
+    private static Logger LOG = Logger.getLogger(MimeTypesReader.class.getName());
 
-    private StringBuilder characters = null;
-
-    MimeTypesReader(MimeTypes types) {
-        this.types = types;
-    }
-
-    void read(InputStream stream) throws IOException, MimeTypeException {
+    static {
         try {
-            SAXParserFactory factory = SAXParserFactory.newInstance();
-            factory.setNamespaceAware(false);
-            SAXParser parser = factory.newSAXParser();
-            parser.parse(stream, this);
-        } catch (ParserConfigurationException e) {
-            throw new MimeTypeException("Unable to create an XML parser", e);
-        } catch (SAXException e) {
-            throw new MimeTypeException("Invalid type configuration", e);
+            setPoolSize(POOL_SIZE);
+        } catch (TikaException e) {
+            throw new RuntimeException("problem initializing SAXParser pool", e);
         }
     }
 
-    void read(Document document) throws MimeTypeException {
+    protected final MimeTypes types;
+
+    /** Current type */
+    protected MimeType type = null;
+
+    protected int priority;
+
+    protected StringBuilder characters = null;
+
+    protected MimeTypesReader(MimeTypes types) {
+        this.types = types;
+    }
+
+    public void read(InputStream stream) throws IOException, MimeTypeException {
+        SAXParser parser = null;
         try {
-            TransformerFactory factory = TransformerFactory.newInstance();
-            Transformer transformer = factory.newTransformer();
+
+            parser = acquireSAXParser();
+            parser.parse(stream, this);
+        } catch (TikaException e) {
+            throw new MimeTypeException("Unable to create an XML parser", e);
+        } catch (SAXException e) {
+            throw new MimeTypeException("Invalid type configuration", e);
+        } finally {
+            if (parser != null) {
+                releaseParser(parser);
+            }
+        }
+    }
+
+    public void read(Document document) throws MimeTypeException {
+        try {
+            Transformer transformer = XMLReaderUtils.getTransformer();
             transformer.transform(new DOMSource(document), new SAXResult(this));
-        } catch (TransformerException e) {
+        } catch (TransformerException | TikaException e) {
             throw new MimeTypeException("Failed to parse type registry", e);
         }
     }
@@ -142,10 +175,13 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
         if (type == null) {
             if (MIME_TYPE_TAG.equals(qName)) {
                 String name = attributes.getValue(MIME_TYPE_TYPE_ATTR);
+                String interpretedAttr = attributes.getValue(INTERPRETED_ATTR);
+                boolean interpreted = "true".equals(interpretedAttr);
                 try {
                     type = types.forName(name);
+                    type.setInterpreted(interpreted);
                 } catch (MimeTypeException e) {
-                    throw new SAXException(e);
+                    handleMimeError(name, e, qName, attributes);
                 }
             }
         } else if (ALIAS_TAG.equals(qName)) {
@@ -154,7 +190,10 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
         } else if (SUB_CLASS_OF_TAG.equals(qName)) {
             String parent = attributes.getValue(SUB_CLASS_TYPE_ATTR);
             types.setSuperType(type, MediaType.parse(parent));
-        } else if (COMMENT_TAG.equals(qName)) {
+        } else if (ACRONYM_TAG.equals(qName)||
+                   COMMENT_TAG.equals(qName)||
+                   TIKA_LINK_TAG.equals(qName)||
+                   TIKA_UTI_TAG.equals(qName)) {
             characters = new StringBuilder();
         } else if (GLOB_TAG.equals(qName)) {
             String pattern = attributes.getValue(PATTERN_ATTR);
@@ -163,7 +202,7 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
                 try {
                     types.addPattern(type, pattern, Boolean.valueOf(isRegex));
                 } catch (MimeTypeException e) {
-                    throw new SAXException(e);
+                  handleGlobError(type, pattern, e, qName, attributes);
                 }
             }
         } else if (ROOT_XML_TAG.equals(qName)) {
@@ -171,15 +210,22 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
             String name = attributes.getValue(LOCAL_NAME_ATTR);
             type.addRootXML(namespace, name);
         } else if (MATCH_TAG.equals(qName)) {
-            String kind = attributes.getValue(MATCH_TYPE_ATTR);
-            String offset = attributes.getValue(MATCH_OFFSET_ATTR);
-            String value = attributes.getValue(MATCH_VALUE_ATTR);
-            String mask = attributes.getValue(MATCH_MASK_ATTR);
-            if (kind == null) {
-                kind = "string";
+            if (attributes.getValue(MATCH_MINSHOULDMATCH_ATTR) != null) {
+                current = new ClauseRecord(
+                        new MinShouldMatchVal(
+                            Integer.parseInt(
+                                    attributes.getValue(MATCH_MINSHOULDMATCH_ATTR))));
+            } else {
+                String kind = attributes.getValue(MATCH_TYPE_ATTR);
+                String offset = attributes.getValue(MATCH_OFFSET_ATTR);
+                String value = attributes.getValue(MATCH_VALUE_ATTR);
+                String mask = attributes.getValue(MATCH_MASK_ATTR);
+                if (kind == null) {
+                    kind = "string";
+                }
+                current = new ClauseRecord(
+                        new MagicMatch(type.getType(), kind, offset, value, mask));
             }
-            current = new ClauseRecord(
-                    new MagicMatch(type.getType(), kind, offset, value, mask));
         } else if (MAGIC_TAG.equals(qName)) {
             String value = attributes.getValue(MAGIC_PRIORITY_ATTR);
             if (value != null && value.length() > 0) {
@@ -199,6 +245,20 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
             } else if (COMMENT_TAG.equals(qName)) {
                 type.setDescription(characters.toString().trim());
                 characters = null;
+            } else if (ACRONYM_TAG.equals(qName)) {
+                type.setAcronym(characters.toString().trim());
+                characters = null;
+            } else if (TIKA_UTI_TAG.equals(qName)) {
+                type.setUniformTypeIdentifier(characters.toString().trim());
+                characters = null;
+            } else if (TIKA_LINK_TAG.equals(qName)) {
+                try {
+                    type.addLink(new URI(characters.toString().trim()));
+                } 
+                catch (URISyntaxException e) {
+                    throw new IllegalArgumentException("unable to parse link: "+characters, e);
+                }
+                characters = null;
             } else if (MATCH_TAG.equals(qName)) {
                 current.stop();
             } else if (MAGIC_TAG.equals(qName)) {
@@ -217,6 +277,14 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
         }
     }
 
+    protected void handleMimeError(String input, MimeTypeException ex, String qName, Attributes attributes) throws SAXException {
+      throw new SAXException(ex);
+    }
+    
+    protected void handleGlobError(MimeType type, String pattern, MimeTypeException ex, String qName, Attributes attributes) throws SAXException {
+      throw new SAXException(ex);
+    }
+
     private ClauseRecord current = new ClauseRecord(null);
 
     private class ClauseRecord {
@@ -233,7 +301,9 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
         }
 
         public void stop() {
-            if (subclauses != null) {
+            if (clause instanceof MinShouldMatchVal) {
+                clause = new MinShouldMatchClause(((MinShouldMatchVal)clause).getVal(), subclauses);
+            } else if (subclauses != null) {
                 Clause subclause;
                 if (subclauses.size() == 1) {
                     subclause = subclauses.get(0);
@@ -242,6 +312,7 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
                 }
                 clause = new AndClause(clause, subclause);
             }
+
             if (parent.subclauses == null) {
                 parent.subclauses = Collections.singletonList(clause);
             } else {
@@ -260,4 +331,118 @@ class MimeTypesReader extends DefaultHandler implements MimeTypesReaderMetKeys {
 
     }
 
+    /**
+     * Shim class used during building of actual classes.
+     * This temporarily holds the value of the minShouldMatchClause
+     * so that the actual MinShouldMatchClause can have a cleaner/immutable
+     * initialization.
+     */
+    private static class MinShouldMatchVal implements Clause {
+
+        private final int val;
+
+        MinShouldMatchVal(int val) {
+            this.val = val;
+        }
+
+        int getVal() {
+            return val;
+        }
+        @Override
+        public boolean eval(byte[] data) {
+            throw new IllegalStateException("This should never be used " +
+                    "on this placeholder class");
+        }
+
+        @Override
+        public int size() {
+            return 0;
+        }
+    }
+    /**
+     * Acquire a SAXParser from the pool; create one if it
+     * doesn't exist.  Make sure to {@link #releaseParser(SAXParser)} in
+     * a <code>finally</code> block every time you call this.
+     *
+     * @return a SAXParser
+     * @throws TikaException
+     */
+    private static SAXParser acquireSAXParser()
+            throws TikaException {
+        while (true) {
+            SAXParser parser = null;
+            try {
+                READ_WRITE_LOCK.readLock().lock();
+                parser = SAX_PARSERS.poll(10, TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                throw new TikaException("interrupted while waiting for SAXParser", e);
+            } finally {
+                READ_WRITE_LOCK.readLock().unlock();
+
+            }
+            if (parser != null) {
+                return parser;
+            }
+        }
+    }
+
+    /**
+     * Return parser to the pool for reuse
+     *
+     * @param parser parser to return
+     */
+    private static void releaseParser(SAXParser parser) {
+        try {
+            parser.reset();
+        } catch (UnsupportedOperationException e) {
+            //ignore
+        }
+        try {
+            READ_WRITE_LOCK.readLock().lock();
+            //if there are extra parsers (e.g. after a reset of the pool to a smaller size),
+            // this parser will not be added and will then be gc'd
+            SAX_PARSERS.offer(parser);
+        } finally {
+            READ_WRITE_LOCK.readLock().unlock();
+        }
+    }
+
+    /**
+     * Set the pool size for cached XML parsers.
+     *
+     * @param poolSize
+     */
+    public static void setPoolSize(int poolSize) throws TikaException {
+        try {
+            //stop the world with a write lock
+            //parsers that are currently in use will be offered, but not
+            //accepted and will be gc'd
+            READ_WRITE_LOCK.writeLock().lock();
+            SAX_PARSERS = new ArrayBlockingQueue<>(poolSize);
+            for (int i = 0; i < poolSize; i++) {
+                SAX_PARSERS.offer(newSAXParser());
+            }
+            POOL_SIZE = poolSize;
+        } finally {
+            READ_WRITE_LOCK.writeLock().unlock();
+        }
+    }
+
+    private static SAXParser newSAXParser() throws TikaException {
+        SAXParserFactory factory = SAXParserFactory.newInstance();
+        factory.setNamespaceAware(false);
+        try {
+            factory.setFeature(
+                    XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        } catch (ParserConfigurationException|SAXException e) {
+            LOG.log(Level.WARNING,
+                    "can't set secure parsing feature on SAXParserFactory: " +
+                    factory.getClass() + ". User assumes responsibility for consequences.");
+        }
+        try {
+            return factory.newSAXParser();
+        } catch (ParserConfigurationException | SAXException e) {
+            throw new TikaException("can't create saxparser", e);
+        }
+    }
 }

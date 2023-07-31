@@ -53,14 +53,14 @@ public class XHTMLContentHandler extends SafeContentHandler {
      * The elements that are in the <head> section.
      */
     private static final Set<String> HEAD =
-        unmodifiableSet("title", "link", "base", "meta");
+        unmodifiableSet("title", "link", "base", "meta", "script");
 
     /**
      * The elements that are automatically emitted by lazyStartHead, so
      * skip them if they get sent to startElement/endElement by mistake.
      */
     private static final Set<String> AUTO =
-        unmodifiableSet("html", "head", "body", "frameset");
+        unmodifiableSet("head", "frameset");
 
     /**
      * The elements that get prepended with the {@link #TAB} character.
@@ -74,7 +74,8 @@ public class XHTMLContentHandler extends SafeContentHandler {
     public static final Set<String> ENDLINE = unmodifiableSet(
             "p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "ul", "ol", "dl",
             "pre", "hr", "blockquote", "address", "fieldset", "table", "form",
-            "noscript", "li", "dt", "dd", "noframes", "br", "tr", "select", "option");
+            "noscript", "li", "dt", "dd", "noframes", "br", "tr", "select",
+            "option", "link", "script");
 
     private static final Attributes EMPTY_ATTRIBUTES = new AttributesImpl();
 
@@ -90,6 +91,11 @@ public class XHTMLContentHandler extends SafeContentHandler {
     private final Metadata metadata;
 
     /**
+     * Flag to indicate whether the document has been started.
+     */
+    private boolean documentStarted = false;
+    
+    /**
      * Flags to indicate whether the document head element has been started/ended.
      */
     private boolean headStarted = false;
@@ -102,14 +108,18 @@ public class XHTMLContentHandler extends SafeContentHandler {
     }
 
     /**
-     * Starts an XHTML document by setting up the namespace mappings.
+     * Starts an XHTML document by setting up the namespace mappings 
+     * when called for the first time.
      * The standard XHTML prefix is generated lazily when the first
      * element is started.
      */
     @Override
     public void startDocument() throws SAXException {
-        super.startDocument();
-        startPrefixMapping("", XHTML);
+    	if(!documentStarted){
+    		documentStarted = true;
+            super.startDocument();
+            startPrefixMapping("", XHTML);
+    	}
     }
 
     /**
@@ -128,7 +138,12 @@ public class XHTMLContentHandler extends SafeContentHandler {
             
             // Call directly, so we don't go through our startElement(), which will
             // ignore these elements.
-            super.startElement(XHTML, "html", "html", EMPTY_ATTRIBUTES);
+            AttributesImpl htmlAttrs = new AttributesImpl();
+            String lang = metadata.get(Metadata.CONTENT_LANGUAGE);
+            if (lang != null) {
+                htmlAttrs.addAttribute("", "lang", "lang", "CDATA", lang);
+            }
+            super.startElement(XHTML, "html", "html", htmlAttrs);
             newline();
             super.startElement(XHTML, "head", "head", EMPTY_ATTRIBUTES);
             newline();
@@ -315,6 +330,16 @@ public class XHTMLContentHandler extends SafeContentHandler {
             characters(value);
             endElement(name);
         }
+    }
+    
+    @Override
+    protected boolean isInvalid(int ch) {
+        if(super.isInvalid(ch)) return true;
+        // These control chars are  invalid in XHTML.
+        if(0x7F <= ch && ch <=0x9F) {
+            return true;
+        }
+        return false;
     }
 
 }

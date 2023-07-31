@@ -16,9 +16,11 @@
  */
 package org.apache.tika;
 
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
 
-public class TikaDetectionTest extends TestCase {
+import org.junit.Test;
+
+public class TikaDetectionTest {
 
     private final Tika tika = new Tika();
 
@@ -35,6 +37,7 @@ public class TikaDetectionTest extends TestCase {
      * }'
      * </pre>
      */
+    @Test
     public void testHttpServerFileExtensions() {
         assertEquals("application/andrew-inset", tika.detect("x.ez"));
         assertEquals("application/applixware", tika.detect("x.aw"));
@@ -74,8 +77,8 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/octet-stream", tika.detect("x.lrf"));
         assertEquals("application/octet-stream", tika.detect("x.lzh"));
         assertEquals("application/octet-stream", tika.detect("x.so"));
-        assertEquals("application/octet-stream", tika.detect("x.iso"));
-        assertEquals("application/octet-stream", tika.detect("x.dmg"));
+        assertEquals("application/x-iso9660-image", tika.detect("x.iso"));
+        assertEquals("application/x-apple-diskimage", tika.detect("x.dmg"));
         assertEquals("application/octet-stream", tika.detect("x.dist"));
         assertEquals("application/octet-stream", tika.detect("x.distz"));
         assertEquals("application/octet-stream", tika.detect("x.pkg"));
@@ -86,10 +89,12 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/oda", tika.detect("x.oda"));
         assertEquals("application/oebps-package+xml", tika.detect("x.opf"));
         assertEquals("application/ogg", tika.detect("x.ogx"));
-        assertEquals("application/onenote", tika.detect("x.onetoc"));
-        assertEquals("application/onenote", tika.detect("x.onetoc2"));
-        assertEquals("application/onenote", tika.detect("x.onetmp"));
-        assertEquals("application/onenote", tika.detect("x.onepkg"));
+        // Differ from httpd - We have subtypes they lack
+        //assertEquals("application/onenote", tika.detect("x.one"));
+        //assertEquals("application/onenote", tika.detect("x.onetoc"));
+        //assertEquals("application/onenote", tika.detect("x.onetoc2"));
+        //assertEquals("application/onenote", tika.detect("x.onetmp"));
+        //assertEquals("application/onenote", tika.detect("x.onepkg"));
         assertEquals("application/patch-ops-error+xml", tika.detect("x.xer"));
         assertEquals("application/pdf", tika.detect("x.pdf"));
         assertEquals("application/pgp-encrypted", tika.detect("x.pgp"));
@@ -126,6 +131,9 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/sdp", tika.detect("x.sdp"));
         assertEquals("application/set-payment-initiation", tika.detect("x.setpay"));
         assertEquals("application/set-registration-initiation", tika.detect("x.setreg"));
+        assertEquals("application/sldworks", tika.detect("x.sldprt"));
+        assertEquals("application/sldworks", tika.detect("x.sldasm"));
+        assertEquals("application/sldworks", tika.detect("x.slddrw"));
         assertEquals("application/shf+xml", tika.detect("x.shf"));
         assertEquals("application/smil+xml", tika.detect("x.smi"));
         assertEquals("application/smil+xml", tika.detect("x.smil"));
@@ -376,7 +384,8 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/vnd.novadigm.ext", tika.detect("x.ext"));
         assertEquals("application/vnd.oasis.opendocument.chart", tika.detect("x.odc"));
         assertEquals("application/vnd.oasis.opendocument.chart-template", tika.detect("x.otc"));
-        assertEquals("application/vnd.oasis.opendocument.database", tika.detect("x.odb"));
+        // Differ from httpd - Mimetype embedded in file is .base not .database
+        //assertEquals("application/vnd.oasis.opendocument.database", tika.detect("x.odb"));
         assertEquals("application/vnd.oasis.opendocument.formula", tika.detect("x.odf"));
         assertEquals("application/vnd.oasis.opendocument.formula-template", tika.detect("x.odft"));
         assertEquals("application/vnd.oasis.opendocument.graphics", tika.detect("x.odg"));
@@ -577,12 +586,15 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/x-dosexec", tika.detect("x.exe"));
         assertEquals("application/x-msdownload", tika.detect("x.dll"));
         assertEquals("application/x-msdownload", tika.detect("x.com"));
-        assertEquals("application/x-msdownload", tika.detect("x.bat"));
-        assertEquals("application/x-msdownload", tika.detect("x.msi"));
+        // Differ from httpd - BAT is different from normal windows executables
+        //assertEquals("application/x-msdownload", tika.detect("x.bat"));
+        // Differ from httpd - MSI is different from normal windows executables
+        //assertEquals("application/x-msdownload", tika.detect("x.msi"));
         assertEquals("application/x-msmediaview", tika.detect("x.mvb"));
         assertEquals("application/x-msmediaview", tika.detect("x.m13"));
         assertEquals("application/x-msmediaview", tika.detect("x.m14"));
-        assertEquals("application/x-msmetafile", tika.detect("x.wmf"));
+        // Differ from httpd - wmf was properly registered in RFC 7903
+        //assertEquals("application/x-msmetafile", tika.detect("x.wmf"));
         assertEquals("application/x-msmoney", tika.detect("x.mny"));
         assertEquals("application/x-mspublisher", tika.detect("x.pub"));
         assertEquals("application/x-msschedule", tika.detect("x.scd"));
@@ -612,8 +624,9 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("application/x-texinfo", tika.detect("x.texi"));
         assertEquals("application/x-ustar", tika.detect("x.ustar"));
         assertEquals("application/x-wais-source", tika.detect("x.src"));
-        assertEquals("application/x-x509-ca-cert", tika.detect("x.der"));
-        assertEquals("application/x-x509-ca-cert", tika.detect("x.crt"));
+        // Differ from httpd - use a common parent for CA and User certs
+        //assertEquals("application/x-x509-ca-cert", tika.detect("x.der"));
+        //assertEquals("application/x-x509-ca-cert", tika.detect("x.crt"));
         assertEquals("application/x-xfig", tika.detect("x.fig"));
         assertEquals("application/x-xpinstall", tika.detect("x.xpi"));
         assertEquals("application/xenc+xml", tika.detect("x.xenc"));
@@ -645,8 +658,10 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("audio/mpeg", tika.detect("x.m2a"));
         assertEquals("audio/mpeg", tika.detect("x.m3a"));
         assertEquals("audio/ogg", tika.detect("x.oga"));
-        assertEquals("audio/ogg", tika.detect("x.ogg"));
-        assertEquals("audio/ogg", tika.detect("x.spx"));
+        // Differ from httpd - Use a dedicated mimetype of Vorbis
+        //assertEquals("audio/ogg", tika.detect("x.ogg"));
+        // Differ from httpd - Speex more commonly uses its own mimetype
+        //assertEquals("audio/ogg", tika.detect("x.spx"));
         assertEquals("audio/vnd.digital-winds", tika.detect("x.eol"));
         assertEquals("audio/vnd.dts", tika.detect("x.dts"));
         assertEquals("audio/vnd.dts.hd", tika.detect("x.dtshd"));
@@ -665,14 +680,16 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("audio/x-pn-realaudio", tika.detect("x.ram"));
         assertEquals("audio/x-pn-realaudio", tika.detect("x.ra"));
         assertEquals("audio/x-pn-realaudio-plugin", tika.detect("x.rmp"));
-        assertEquals("audio/x-wav", tika.detect("x.wav"));
+        // Differ from httpd - wav was properly registered in RFC 2361
+        //assertEquals("audio/x-wav", tika.detect("x.wav"));
         assertEquals("chemical/x-cdx", tika.detect("x.cdx"));
         assertEquals("chemical/x-cif", tika.detect("x.cif"));
         assertEquals("chemical/x-cmdf", tika.detect("x.cmdf"));
         assertEquals("chemical/x-cml", tika.detect("x.cml"));
         assertEquals("chemical/x-csml", tika.detect("x.csml"));
         assertEquals("chemical/x-xyz", tika.detect("x.xyz"));
-        assertEquals("image/x-ms-bmp", tika.detect("x.bmp"));
+        // Differ from httpd - bmp was properly registered in RFC 7903
+        //assertEquals("image/x-ms-bmp", tika.detect("x.bmp"));
         assertEquals("image/cgm", tika.detect("x.cgm"));
         assertEquals("image/g3fax", tika.detect("x.g3"));
         assertEquals("image/gif", tika.detect("x.gif"));
@@ -680,6 +697,8 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("image/jpeg", tika.detect("x.jpeg"));
         assertEquals("image/jpeg", tika.detect("x.jpg"));
         assertEquals("image/jpeg", tika.detect("x.jpe"));
+        assertEquals("image/jpm", tika.detect("x.jpm"));
+        assertEquals("image/jpm", tika.detect("x.jpgm"));
         assertEquals("image/png", tika.detect("x.png"));
         assertEquals("image/prs.btif", tika.detect("x.btif"));
         assertEquals("image/svg+xml", tika.detect("x.svg"));
@@ -707,8 +726,12 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("image/x-freehand", tika.detect("x.fh4"));
         assertEquals("image/x-freehand", tika.detect("x.fh5"));
         assertEquals("image/x-freehand", tika.detect("x.fh7"));
-        assertEquals("image/x-icon", tika.detect("x.ico"));
-        assertEquals("image/x-pcx", tika.detect("x.pcx"));
+        // Differ from httpd - An official mimetype has subsequently been issued
+        //  favicon.ico +friends should now be image/vnd.microsoft.icon
+        //assertEquals("image/x-icon", tika.detect("x.ico"));
+        // Differ from httpd - An official mimetype has subsequently been issued
+        //  pcx PiCture eXchange files should now be image/vnd.zbrush.pcx
+        //assertEquals("image/x-pcx", tika.detect("x.pcx"));
         assertEquals("image/x-pict", tika.detect("x.pic"));
         assertEquals("image/x-pict", tika.detect("x.pct"));
         assertEquals("image/x-portable-anymap", tika.detect("x.pnm"));
@@ -797,8 +820,6 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("video/h263", tika.detect("x.h263"));
         assertEquals("video/h264", tika.detect("x.h264"));
         assertEquals("video/jpeg", tika.detect("x.jpgv"));
-        assertEquals("video/jpm", tika.detect("x.jpm"));
-        assertEquals("video/jpm", tika.detect("x.jpgm"));
         assertEquals("video/mj2", tika.detect("x.mj2"));
         assertEquals("video/mj2", tika.detect("x.mjp2"));
         assertEquals("video/mp4", tika.detect("x.mp4"));
@@ -822,7 +843,7 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("video/x-flv", tika.detect("x.flv"));
         assertEquals("video/x-m4v", tika.detect("x.m4v"));
         assertEquals("video/x-ms-asf", tika.detect("x.asf"));
-        assertEquals("video/x-ms-asf", tika.detect("x.asx"));
+        assertEquals("application/x-ms-asx", tika.detect("x.asx"));
         assertEquals("video/x-ms-wm", tika.detect("x.wm"));
         assertEquals("video/x-ms-wmv", tika.detect("x.wmv"));
         assertEquals("video/x-ms-wmx", tika.detect("x.wmx"));
@@ -830,6 +851,11 @@ public class TikaDetectionTest extends TestCase {
         assertEquals("video/x-msvideo", tika.detect("x.avi"));
         assertEquals("video/x-sgi-movie", tika.detect("x.movie"));
         assertEquals("x-conference/x-cooltalk", tika.detect("x.ice"));
+
+        assertEquals("application/x-grib", tika.detect("x.grb"));
+        assertEquals("application/x-grib", tika.detect("x.grb1"));
+        assertEquals("application/x-grib", tika.detect("x.grb2"));
+        assertEquals("application/dif+xml", tika.detect("x.dif"));
     }
 
 }

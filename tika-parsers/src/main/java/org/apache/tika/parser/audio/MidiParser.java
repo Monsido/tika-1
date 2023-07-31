@@ -16,13 +16,7 @@
  */
 package org.apache.tika.parser.audio;
 
-import java.io.BufferedInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import static java.nio.charset.StandardCharsets.ISO_8859_1;
 
 import javax.sound.midi.InvalidMidiDataException;
 import javax.sound.midi.MetaMessage;
@@ -31,6 +25,13 @@ import javax.sound.midi.MidiSystem;
 import javax.sound.midi.Patch;
 import javax.sound.midi.Sequence;
 import javax.sound.midi.Track;
+import java.io.BufferedInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
@@ -65,9 +66,11 @@ public class MidiParser extends AbstractParser {
         xhtml.startDocument();
 
         // MidiSystem expects the stream to support the mark feature
-        InputStream buffered = new BufferedInputStream(stream);
+        if (! stream.markSupported()) {
+            stream = new BufferedInputStream(stream);
+        }
         try {
-            Sequence sequence = MidiSystem.getSequence(buffered);
+            Sequence sequence = MidiSystem.getSequence(stream);
 
             Track[] tracks = sequence.getTracks();
             metadata.set("tracks", String.valueOf(tracks.length));
@@ -101,7 +104,7 @@ public class MidiParser extends AbstractParser {
                         if (meta.getType() >= 1 && meta.getType() <= 15) {
                             // FIXME: What's the encoding?
                             xhtml.characters(
-                                    new String(meta.getData(), "ISO-8859-1"));
+                                    new String(meta.getData(), ISO_8859_1));
                         }
                     }
                 }

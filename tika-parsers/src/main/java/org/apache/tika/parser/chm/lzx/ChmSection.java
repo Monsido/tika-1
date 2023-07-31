@@ -20,19 +20,27 @@ import java.math.BigInteger;
 import java.util.Arrays;
 
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.exception.TikaMemoryLimitException;
 import org.apache.tika.parser.chm.core.ChmCommons;
 
 public class ChmSection {
-    private byte[] data;
+    final private byte[] data;
+    final private byte[] prevcontent;
     private int swath;// kiks
     private int total;// remains
     private int buffer;// val
 
     public ChmSection(byte[] data) throws TikaException {
-        ChmCommons.assertByteArrayNotNull(data);
-        setData(data);
+        this(data, null);
     }
 
+    public ChmSection(byte[] data, byte[] prevconent) throws TikaException {
+        ChmCommons.assertByteArrayNotNull(data);
+        this.data = data;
+        this.prevcontent = prevconent;
+        //setData(data);
+    }
+    
     /* Utilities */
     public byte[] reverseByteOrder(byte[] toBeReversed) throws TikaException {
         ChmCommons.assertByteArrayNotNull(toBeReversed);
@@ -48,7 +56,11 @@ public class ChmSection {
         return getDesyncBits(bit, bit);
     }
 
-    public int getDesyncBits(int bit, int removeBit) {
+    public int peekBits(int bit) {
+        return getDesyncBits(bit, 0);
+    }
+    
+    private int getDesyncBits(int bit, int removeBit) {
         while (getTotal() < 16) {
             setBuffer((getBuffer() << 16) + unmarshalUByte()
                     + (unmarshalUByte() << 8));
@@ -61,7 +73,7 @@ public class ChmSection {
     }
 
     public int unmarshalUByte() {
-        return (int) (getByte() & 255);
+        return getByte() & 255;
     }
 
     public byte getByte() {
@@ -80,7 +92,14 @@ public class ChmSection {
         return data;
     }
 
-    public BigInteger getBigInteger(int i) {
+    public byte[] getPrevContent() {
+        return prevcontent;
+    }
+
+    public BigInteger getBigInteger(int i) throws TikaException {
+        if (i > 8) {
+            throw new TikaMemoryLimitException("Big integer can't be > 8");
+        }
         if (getData() == null)
             return BigInteger.ZERO;
         if (getData().length - getSwath() < i)
@@ -100,16 +119,16 @@ public class ChmSection {
             byteval[i] = (byte) c[i];
         return byteval;
     }
-
+/*
     public BigInteger unmarshalUlong() {
         return getBigInteger(8);
     }
 
     public long unmarshalUInt() {
         return getBigInteger(4).longValue();
-    }
+    }*/
 
-    public int unmarshalInt() {
+    public int unmarshalInt() throws TikaException {
         return getBigInteger(4).intValue();
     }
 
@@ -166,9 +185,9 @@ public class ChmSection {
         }
     }
 
-    private void setData(byte[] data) {
-        this.data = data;
-    }
+//    private void setData(byte[] data) {
+//        this.data = data;
+//    }
 
     public int getSwath() {
         return swath;

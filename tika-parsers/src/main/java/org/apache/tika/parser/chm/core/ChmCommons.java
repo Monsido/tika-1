@@ -19,7 +19,6 @@ package org.apache.tika.parser.chm.core;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 
 import org.apache.tika.exception.TikaException;
@@ -27,8 +26,14 @@ import org.apache.tika.parser.chm.accessor.ChmLzxcResetTable;
 import org.apache.tika.parser.chm.accessor.DirectoryListingEntry;
 import org.apache.tika.parser.chm.assertion.ChmAssert;
 import org.apache.tika.parser.chm.exception.ChmParsingException;
+import org.apache.tika.parser.microsoft.ooxml.xwpf.XWPFEventBasedWordExtractor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ChmCommons {
+
+    private static final Logger LOG = LoggerFactory.getLogger(ChmCommons.class);
+
     /* Prevents initialization */
     private ChmCommons() {
     }
@@ -211,21 +216,20 @@ public class ChmCommons {
                 && !ChmCommons.isEmpty(fileToBeSaved)) {
             try {
                 output = new FileOutputStream(fileToBeSaved);
-                if (output != null)
-                    for (int i = 0; i < buffer.length; i++) {
-                        output.write(buffer[i]);
-                    }
+                for (byte[] bufferEntry : buffer) {
+                    output.write(bufferEntry);
+                }
             } catch (FileNotFoundException e) {
                 throw new TikaException(e.getMessage());
             } catch (IOException e) {
-                e.printStackTrace();
+                LOG.warn("problem writing tmp file", e);
             } finally {
                 if (output != null)
                     try {
                         output.flush();
                         output.close();
                     } catch (IOException e) {
-                        e.printStackTrace();
+                        LOG.warn("problem writing tmp file", e);
                     }
             }
         }
@@ -324,12 +328,9 @@ public class ChmCommons {
      */
     public static int indexOf(List<DirectoryListingEntry> list, String pattern) {
         int place = 0;
-        for (Iterator<DirectoryListingEntry> iterator = list.iterator(); iterator.hasNext();) {
-            DirectoryListingEntry directoryListingEntry = iterator.next();
-            if (directoryListingEntry.toString().contains(pattern)) {
-                return place;
-            } else
-                ++place;
+        for (DirectoryListingEntry directoryListingEntry : list) {
+            if (directoryListingEntry.toString().contains(pattern)) return place;
+            ++place;
         }
         return -1;// not found
     }
@@ -337,11 +338,14 @@ public class ChmCommons {
     /*
      * This method is added because of supporting of Java 5
      */
-    public static byte[] copyOfRange(byte[] original, int from, int to) {
+    public static byte[] copyOfRange(byte[] original, int from, int to) throws TikaException {
         checkCopyOfRangeParams(original, from, to);
         int newLength = to - from;
         if (newLength < 0)
             throw new IllegalArgumentException(from + " > " + to);
+        if (to > original.length) {
+            throw new TikaException("can't copy beyond array length");
+        }
         byte[] copy = new byte[newLength];
         System.arraycopy(original, from, copy, 0, Math.min(original.length - from, newLength));
         return copy;
@@ -361,12 +365,6 @@ public class ChmCommons {
      */
     public static boolean isEmpty(String str) {
         return str == null || str.length() == 0;
-    }
-
-    /**
-     * @param args
-     */
-    public static void main(String[] args) {
     }
 
 }

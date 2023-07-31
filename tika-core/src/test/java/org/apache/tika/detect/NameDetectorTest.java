@@ -24,24 +24,30 @@ import java.util.regex.Pattern;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.mime.MediaType;
 
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
+import org.junit.Before;
+import org.junit.Test;
 
 /**
  * Test cases for the {@link NameDetector} class.
  */
-public class NameDetectorTest extends TestCase {
+public class NameDetectorTest {
 
     private Detector detector;
 
-    protected void setUp() {
+    @Before
+    public void setUp() {
         Map<Pattern, MediaType> patterns = new HashMap<Pattern, MediaType>();
         patterns.put(
                 Pattern.compile(".*\\.txt", Pattern.CASE_INSENSITIVE),
                 MediaType.TEXT_PLAIN);
         patterns.put(Pattern.compile("README"), MediaType.TEXT_PLAIN);
+        patterns.put(Pattern.compile(".*\\.hdr"), MediaType.application("envi.hdr"));
         detector = new NameDetector(patterns);
     }
 
+    @Test
     public void testDetect() {
         assertDetect(MediaType.TEXT_PLAIN, "text.txt");
         assertDetect(MediaType.TEXT_PLAIN, "text.txt ");    // trailing space
@@ -60,12 +66,24 @@ public class NameDetectorTest extends TestCase {
         assertDetect(MediaType.OCTET_STREAM, "ReadMe");     // case sensitive
         assertDetect(MediaType.OCTET_STREAM, "README.NOW");
 
+        // TIKA-1928 # in the filename
+        assertDetect(MediaType.TEXT_PLAIN, "text.txt");
+        assertDetect(MediaType.TEXT_PLAIN, "text#.txt");   // # before extension
+        assertDetect(MediaType.TEXT_PLAIN, "text#123.txt");// # before extension
+        assertDetect(MediaType.TEXT_PLAIN, "text.txt#pdf");// # after extension
+
+        // Check # as URL fragment too
+        assertDetect(MediaType.TEXT_PLAIN, "http://foo/test.txt?1=2#pdf");
+        assertDetect(MediaType.TEXT_PLAIN, "http://foo/test.txt#pdf");
+
         // tough one
         assertDetect(
                 MediaType.TEXT_PLAIN,
                 " See http://www.example.com:1234/README.txt?a=b#c \n");
         assertDetect(MediaType.TEXT_PLAIN, "See README.txt"); // even this!
         assertDetect(MediaType.OCTET_STREAM, "See README");   // but not this
+
+        assertDetect(MediaType.application("envi.hdr"), "ang20150420t182050_corr_v1e_img.hdr");
 
         // test also the zero input cases
         assertDetect(MediaType.OCTET_STREAM, "");
@@ -88,5 +106,4 @@ public class NameDetectorTest extends TestCase {
             fail("NameDetector should never throw an IOException");
         }
     }
-
 }

@@ -25,6 +25,8 @@ import java.util.regex.Pattern;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.mime.MediaType;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 /**
  * Content type detection based on the resource name. An instance of this
  * class contains a set of regular expression patterns that are matched
@@ -95,14 +97,10 @@ public class NameDetector implements Detector {
         // Look for a resource name in the input metadata
         String name = metadata.get(Metadata.RESOURCE_NAME_KEY);
         if (name != null) {
-            // If the name is a URL, skip the trailing query and fragment parts
+            // If the name is a URL, skip the trailing query
             int question = name.indexOf('?');
             if (question != -1) {
                 name = name.substring(0, question);
-            }
-            int hash = name.indexOf('#');
-            if (hash != -1) {
-                name = name.substring(0, hash);
             }
 
             // If the name is a URL or a path, skip all but the last component
@@ -115,11 +113,20 @@ public class NameDetector implements Detector {
                 name = name.substring(backslash + 1);
             }
 
+            // Strip any fragments from the end, but only ones after the extension
+            int hash = name.lastIndexOf('#');
+            int dot = name.indexOf('.');
+            if (hash != -1) {
+                if (dot == -1 || hash > dot) {
+                    name = name.substring(0, hash);
+                }
+            }
+
             // Decode any potential URL encoding
             int percent = name.indexOf('%');
             if (percent != -1) {
                 try {
-                    name = URLDecoder.decode(name, "UTF-8");
+                    name = URLDecoder.decode(name, UTF_8.name());
                 } catch (UnsupportedEncodingException e) {
                     throw new IllegalStateException("UTF-8 not supported", e);
                 }

@@ -32,7 +32,9 @@ import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioSystem;
 import javax.sound.sampled.UnsupportedAudioFileException;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.io.ProxyInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.XMPDM;
 import org.apache.tika.mime.MediaType;
@@ -50,7 +52,8 @@ public class AudioParser extends AbstractParser {
     private static final Set<MediaType> SUPPORTED_TYPES =
         Collections.unmodifiableSet(new HashSet<MediaType>(Arrays.asList(
                 MediaType.audio("basic"),
-                MediaType.audio("x-wav"),
+                MediaType.audio("vnd.wave"), // Official, fixed in Tika 1.16
+                MediaType.audio("x-wav"),    // Older, used until Tika 1.16
                 MediaType.audio("x-aiff"))));
 
     public Set<MediaType> getSupportedTypes(ParseContext context) {
@@ -65,6 +68,7 @@ public class AudioParser extends AbstractParser {
         if (!stream.markSupported()) {
             stream = new BufferedInputStream(stream);
         }
+        stream = new SkipFullyInputStream(stream);
         try {
             AudioFileFormat fileFormat = AudioSystem.getAudioFileFormat(stream);
             Type type = fileFormat.getType();
@@ -73,7 +77,7 @@ public class AudioParser extends AbstractParser {
             } else if (type == Type.AU || type == Type.SND) {
                 metadata.set(Metadata.CONTENT_TYPE, "audio/basic");
             } else if (type == Type.WAVE) {
-                metadata.set(Metadata.CONTENT_TYPE, "audio/x-wav");
+                metadata.set(Metadata.CONTENT_TYPE, "audio/vnd.wave");
             }
 
             AudioFormat audioFormat = fileFormat.getFormat();
@@ -133,6 +137,19 @@ public class AudioParser extends AbstractParser {
                     metadata.set(entry.getKey(), value.toString());
                 }
             }
+        }
+    }
+
+    private static class SkipFullyInputStream extends ProxyInputStream {
+
+        public SkipFullyInputStream(InputStream proxy) {
+            super(proxy);
+        }
+
+        @Override
+        public long skip(long ln) throws IOException {
+            IOUtils.skipFully(in, ln);
+            return ln;
         }
     }
 

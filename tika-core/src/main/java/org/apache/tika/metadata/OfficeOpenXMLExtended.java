@@ -25,7 +25,7 @@ package org.apache.tika.metadata;
  * 
  * @see <a href="http://www.iso.org/iso/iso_catalogue/catalogue_tc/catalogue_detail.htm?csnumber=59575"
  *        >ISO document of Office Open XML specification</a>
- * @see <a href="http://www.ecma-international.org/publications/standards/Ecma-376.htm
+ * @see <a href="http://www.ecma-international.org/publications/standards/Ecma-376.htm"
  *        >ECMA document of Office Open XML specification</a> 
  */
 public interface OfficeOpenXMLExtended 
@@ -34,15 +34,20 @@ public interface OfficeOpenXMLExtended
     String WORD_PROCESSING_NAMESPACE_URI = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     String PREFIX = "extended-properties";
     String WORD_PROCESSING_PREFIX = "w";
+    String SECURITY_NONE = "None";
+    String SECURITY_PASSWORD_PROTECTED = "PasswordProtected";
+    String SECURITY_READ_ONLY_RECOMMENDED = "ReadOnlyRecommended";
+    String SECURITY_READ_ONLY_ENFORCED = "ReadOnlyEnforced";
+    String SECURITY_LOCKED_FOR_ANNOTATIONS = "LockedForAnnotations";
+    String SECURITY_UNKNOWN = "Unknown";
 
     Property TEMPLATE = Property.externalText(
     		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "Template");
     
-    Property MANAGER = Property.externalText(
+    Property MANAGER = Property.externalTextBag(
     		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "Manager");
     
-    Property COMPANY = Property.externalText(
-    		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "Company");
+    Property COMPANY = Property.externalText(    		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "Company");
     
     Property PRESENTATION_FORMAT = Property.externalText(
     		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "PresentationFormat");
@@ -61,10 +66,18 @@ public interface OfficeOpenXMLExtended
     
     Property APP_VERSION = Property.externalText(
     		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "AppVersion");
-    
+
+    //Integer flag
     Property DOC_SECURITY = Property.externalInteger(
     		PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "DocSecurity");
-    
+
+    //Human readable string explaining doc security flag
+    Property DOC_SECURITY_STRING = Property.externalClosedChoise(
+            PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER +
+            "DocSecurityString", SECURITY_NONE, SECURITY_PASSWORD_PROTECTED,
+            SECURITY_READ_ONLY_RECOMMENDED, SECURITY_READ_ONLY_ENFORCED,
+            SECURITY_LOCKED_FOR_ANNOTATIONS, SECURITY_UNKNOWN);
+
     Property COMMENTS = Property.externalTextBag(
             WORD_PROCESSING_PREFIX + Metadata.NAMESPACE_PREFIX_DELIMITER + "comments");
 }

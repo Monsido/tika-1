@@ -23,8 +23,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
+import org.apache.commons.io.input.CloseShieldInputStream;
 import org.apache.tika.exception.TikaException;
-import org.apache.tika.io.CloseShieldInputStream;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.parser.AbstractParser;
@@ -34,8 +34,11 @@ import org.apache.tika.sax.OfflineContentHandler;
 import org.apache.tika.sax.TaggedContentHandler;
 import org.apache.tika.sax.TextContentHandler;
 import org.apache.tika.sax.XHTMLContentHandler;
+import org.apache.tika.utils.XMLReaderUtils;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
+
+import javax.xml.parsers.SAXParser;
 
 /**
  * XML parser.
@@ -69,21 +72,21 @@ public class XMLParser extends AbstractParser {
 
         TaggedContentHandler tagged = new TaggedContentHandler(handler);
         try {
-            context.getSAXParser().parse(
+            XMLReaderUtils.parseSAX(
                     new CloseShieldInputStream(stream),
                     new OfflineContentHandler(new EmbeddedContentHandler(
-                            getContentHandler(tagged, metadata, context))));
+                            getContentHandler(tagged, metadata, context))), context);
         } catch (SAXException e) {
             tagged.throwIfCauseOf(e);
             throw new TikaException("XML parse error", e);
+        } finally {
+            xhtml.endElement("p");
+            xhtml.endDocument();
         }
-
-        xhtml.endElement("p");
-        xhtml.endDocument();
     }
 
     protected ContentHandler getContentHandler(
             ContentHandler handler, Metadata metadata, ParseContext context) {
-        return new TextContentHandler(handler);
+        return new TextContentHandler(handler, true);
     }
 }

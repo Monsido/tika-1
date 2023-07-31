@@ -16,6 +16,8 @@
  */
 package org.apache.tika.language;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -29,13 +31,14 @@ import java.util.Set;
  * Identifier of the language that best matches a given content profile.
  * The content profile is compared to generic language profiles based on
  * material from various sources.
- *
  * @since Apache Tika 0.5
  * @see <a href="http://www.iccs.inf.ed.ac.uk/~pkoehn/publications/europarl/">
  *      Europarl: A Parallel Corpus for Statistical Machine Translation</a>
  * @see <a href="http://www.loc.gov/standards/iso639-2/php/code_list.php">
  *      ISO 639 Language Codes</a>
+ * @deprecated  use a concrete class of {@link org.apache.tika.language.detect.LanguageDetector}
  */
+@Deprecated
 public class LanguageIdentifier {
     
     /**
@@ -44,7 +47,6 @@ public class LanguageIdentifier {
     private static final Map<String, LanguageProfile> PROFILES =
         new HashMap<String, LanguageProfile>();
     private static final String PROFILE_SUFFIX = ".ngp";
-    private static final String PROFILE_ENCODING = "UTF-8";
 
     private static Properties props = new Properties();
     private static String errors = "";
@@ -72,11 +74,11 @@ public class LanguageIdentifier {
         try {
             LanguageProfile profile = new LanguageProfile();
 
-            InputStream stream =
-                LanguageIdentifier.class.getResourceAsStream(language + PROFILE_SUFFIX);
-            try {
+            try (InputStream stream =
+                    LanguageIdentifier.class.getResourceAsStream(
+                            language + PROFILE_SUFFIX)) {
                 BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(stream, PROFILE_ENCODING));
+                    new BufferedReader(new InputStreamReader(stream, UTF_8));
                 String line = reader.readLine();
                 while (line != null) {
                     if (line.length() > 0 && !line.startsWith("#")) {
@@ -87,8 +89,6 @@ public class LanguageIdentifier {
                     }
                     line = reader.readLine();
                 }
-            } finally {
-                stream.close();
             }
 
             addProfile(language, profile);
@@ -145,7 +145,7 @@ public class LanguageIdentifier {
      * Tries to judge whether the identification is certain enough
      * to be trusted.
      * WARNING: Will never return true for small amount of input texts. 
-     * @return <code>true</code> if the distance is smaller then {@value #CERTAINTY_LIMIT}, <code>false</code> otherwise
+     * @return <code>true</code> if the distance is smaller then {@value LanguageIdentifier#CERTAINTY_LIMIT}, <code>false</code> otherwise
      */
     public boolean isReasonablyCertain() {
         return distance < CERTAINTY_LIMIT;
@@ -218,7 +218,7 @@ public class LanguageIdentifier {
     }
     
     /**
-     * Returns a string of error messages related to initializing langauge profiles
+     * Returns a string of error messages related to initializing language profiles
      * @return the String containing the error messages
      */
     public static String getErrors() {
