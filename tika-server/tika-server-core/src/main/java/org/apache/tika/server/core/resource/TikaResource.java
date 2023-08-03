@@ -674,7 +674,7 @@ public class TikaResource {
                         (SAXTransformerFactory) SAXTransformerFactory.newInstance();
                 TransformerHandler handler = factory.newTransformerHandler();
                 handler.getTransformer().setOutputProperty(OutputKeys.METHOD, format);
-                handler.getTransformer().setOutputProperty(OutputKeys.INDENT, "yes");
+                handler.getTransformer().setOutputProperty(OutputKeys.INDENT, "no");
                 handler.getTransformer().setOutputProperty(OutputKeys.ENCODING, UTF_8.name());
                 handler.setResult(new StreamResult(writer));
                 content = new ExpandedTitleContentHandler(handler);
