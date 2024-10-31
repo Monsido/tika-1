@@ -641,7 +641,7 @@ public class TikaResource {
                         .setOutputProperty(OutputKeys.METHOD, format);
                 handler
                         .getTransformer()
-                        .setOutputProperty(OutputKeys.INDENT, "yes");
+                        .setOutputProperty(OutputKeys.INDENT, "no");
                 handler
                         .getTransformer()
                         .setOutputProperty(OutputKeys.ENCODING, UTF_8.name());
